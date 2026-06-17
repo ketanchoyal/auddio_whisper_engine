@@ -17,6 +17,18 @@ TAG="${1:-whisper-v0.0.1}"
 REPO="ketanchoyal/auddio_whisper_engine"
 REL_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)/build/release"
 
+missing=()
+for tool in cmake ninja xcodebuild gh zip; do
+  command -v "${tool}" >/dev/null 2>&1 || missing+=("${tool}")
+done
+[ -n "${ANDROID_NDK_HOME:-}" ] || missing+=("ANDROID_NDK_HOME (env var)")
+if [ "${#missing[@]}" -gt 0 ]; then
+  echo "ERROR: missing prerequisites:" >&2
+  printf '  - %s\n' "${missing[@]}" >&2
+  echo "Install CLI tools with: brew install cmake ninja gh" >&2
+  exit 1
+fi
+
 echo ">> Building iOS..."
 "${SCRIPT_DIR}/build_ios.sh"
 echo ">> Building macOS..."
