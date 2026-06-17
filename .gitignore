@@ -1,0 +1,31 @@
+# Dart / Flutter
+.dart_tool/
+.flutter-plugins-dependencies
+build/
+coverage/
+/pubspec.lock
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Native build cache
+native/build/
+native/third_party/whisper.cpp/
+.cxx/
+/android/.gradle/
+/android/build/
+
+# Prebuilt native binaries (downloaded from GitHub Releases at build time,
+# never committed — mirrors the mpv_audio_kit delivery model).
+/ios/Frameworks/libauddio_whisper.xcframework/
+/ios/Frameworks/libauddio_whisper_xcframework.zip
+/macos/Frameworks/libauddio_whisper.xcframework/
+/macos/Frameworks/libauddio_whisper_xcframework.zip
+/android/src/main/jniLibs/
+
+# AI tooling
+.claude/
+CLAUDE.md
