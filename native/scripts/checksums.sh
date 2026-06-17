@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)/build/output"
+REL_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)/build/release"
 
 sha() {
   if command -v shasum >/dev/null 2>&1; then
@@ -12,24 +13,34 @@ sha() {
   fi
 }
 
-zip_and_hash() {
-  local label="$1" path="$2"
-  if [ ! -e "${path}" ]; then
-    echo "${label}: MISSING (${path})"
+rm -rf "${REL_DIR}"
+mkdir -p "${REL_DIR}"
+
+# Artifact names MUST match the download URLs in ios/macos podspec and
+# android/build.gradle.kts exactly, or runtime download fails.
+zip_xcframework() {
+  local label="$1" src="$2" asset="$3"
+  if [ ! -d "${src}" ]; then
+    echo "${label}: MISSING (${src}) -- run the build script first"
     return
   fi
-  local zip="${path%.xcframework}.xcframework.zip"
-  rm -f "${zip}"
-  ( cd "$(dirname "${path}")" && zip -qry "$(basename "${zip}")" "$(basename "${path}")" )
-  echo "${label}: $(sha "${zip}")  -> ${zip}"
+  ( cd "$(dirname "${src}")" && zip -qry "${REL_DIR}/${asset}" "$(basename "${src}")" )
+  echo "${label}: $(sha "${REL_DIR}/${asset}")  ${asset}"
 }
 
-zip_and_hash "ios-xcframework" "${OUT_DIR}/libauddio_whisper.xcframework"
-zip_and_hash "macos-xcframework" "${OUT_DIR}/libauddio_whisper.macos.xcframework"
+zip_xcframework "ios" \
+  "${OUT_DIR}/libauddio_whisper.xcframework" \
+  "libauddio_whisper_ios.xcframework.zip"
+zip_xcframework "macos" \
+  "${OUT_DIR}/libauddio_whisper.macos.xcframework" \
+  "libauddio_whisper_macos.xcframework.zip"
 
-if [ -d "${OUT_DIR}/jniLibs" ]; then
-  for so in "${OUT_DIR}"/jniLibs/*/libauddio_whisper.so; do
-    [ -e "${so}" ] || continue
-    echo "android $(basename "$(dirname "${so}")"): $(sha "${so}")  -> ${so}"
-  done
-fi
+for abi in arm64-v8a armeabi-v7a x86_64; do
+  so="${OUT_DIR}/jniLibs/${abi}/libauddio_whisper.so"
+  [ -e "${so}" ] || { echo "android ${abi}: MISSING (${so})"; continue; }
+  cp "${so}" "${REL_DIR}/libauddio_whisper-${abi}.so"
+  echo "android ${abi}: $(sha "${REL_DIR}/libauddio_whisper-${abi}.so")  libauddio_whisper-${abi}.so"
+done
+
+echo ""
+echo "Release artifacts staged in: ${REL_DIR}"
