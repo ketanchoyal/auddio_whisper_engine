@@ -10,7 +10,7 @@ Pod::Spec.new do |s|
   s.version          = '0.0.1'
   s.summary          = 'Prebuilt whisper.cpp engine (Metal + CoreML) for Audiio.'
   s.description      = 'On-device chapter transcription with per-word DTW timestamps.'
-  s.homepage         = 'https://github.com/ketanchoyal/audiio'
+  s.homepage         = 'https://github.com/ketanchoyal/auddio_whisper_engine'
   s.license          = { :type => 'Proprietary' }
   s.author           = { 'Audiio' => 'audiio.app' }
   s.source           = { :path => '.' }
@@ -24,7 +24,7 @@ Pod::Spec.new do |s|
   s.prepare_command = <<-CMD
     RELEASE_TAG="whisper-v0.0.1"
     EXPECTED_SHA256="REPLACE_WITH_MACOS_XCFRAMEWORK_SHA256"
-    URL="https://github.com/ketanchoyal/audiio/releases/download/${RELEASE_TAG}/libauddio_whisper_macos.xcframework.zip"
+    URL="https://github.com/ketanchoyal/auddio_whisper_engine/releases/download/${RELEASE_TAG}/libauddio_whisper_macos.xcframework.zip"
 
     mkdir -p Frameworks
     ZIP_FILE="Frameworks/libauddio_whisper_xcframework.zip"

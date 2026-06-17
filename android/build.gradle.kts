@@ -23,7 +23,7 @@ android {
 
 val RELEASE_TAG = "whisper-v0.0.1"
 val RELEASE_BASE_URL =
-    "https://github.com/ketanchoyal/audiio/releases/download/$RELEASE_TAG"
+    "https://github.com/ketanchoyal/auddio_whisper_engine/releases/download/$RELEASE_TAG"
 
 // TODO(release): replace each sha256 after running native/scripts/build_android.sh
 // + checksums.sh and uploading per-ABI libauddio_whisper.so to GitHub Releases.
