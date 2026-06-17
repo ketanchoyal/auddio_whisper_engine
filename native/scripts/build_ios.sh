@@ -22,6 +22,7 @@ build_slice() {
     -DGGML_METAL=ON \
     -DGGML_METAL_EMBED_LIBRARY=ON \
     -DWHISPER_COREML=ON \
+    -DWHISPER_COREML_ALLOW_FALLBACK=ON \
     -DGGML_OPENMP=OFF
   cmake --build "${dir}" --config Release
 }

@@ -32,18 +32,32 @@ echo ">> Building Android..."
 "${SCRIPT_DIR}/build_android.sh"
 
 echo ">> Staging artifacts + computing checksums..."
-"${SCRIPT_DIR}/checksums.sh" | tee "${REL_DIR}/SHA256SUMS.txt"
+# Write the log to build/ (not REL_DIR): checksums.sh rm -rf's REL_DIR, which
+# would orphan a log opened inside it.
+mkdir -p "$(dirname "${REL_DIR}")"
+"${SCRIPT_DIR}/checksums.sh" | tee "$(dirname "${REL_DIR}")/SHA256SUMS.txt"
 
-echo ">> Creating GitHub release ${TAG} on ${REPO}..."
-gh release create "${TAG}" \
-  --repo "${REPO}" \
-  --title "${TAG}" \
-  --notes "Prebuilt whisper.cpp engine binaries for auddio_whisper_engine." \
-  "${REL_DIR}/libauddio_whisper_ios.xcframework.zip" \
-  "${REL_DIR}/libauddio_whisper_macos.xcframework.zip" \
-  "${REL_DIR}/libauddio_whisper-arm64-v8a.so" \
-  "${REL_DIR}/libauddio_whisper-armeabi-v7a.so" \
+ASSETS=(
+  "${REL_DIR}/libauddio_whisper_ios.xcframework.zip"
+  "${REL_DIR}/libauddio_whisper_macos.xcframework.zip"
+  "${REL_DIR}/libauddio_whisper-arm64-v8a.so"
+  "${REL_DIR}/libauddio_whisper-armeabi-v7a.so"
   "${REL_DIR}/libauddio_whisper-x86_64.so"
+)
+
+# Idempotent: create the release if the tag is new, else replace its assets
+# (--clobber) so rebuilds re-upload over an existing tag instead of failing.
+if gh release view "${TAG}" --repo "${REPO}" >/dev/null 2>&1; then
+  echo ">> Release ${TAG} exists on ${REPO}; uploading assets with --clobber..."
+  gh release upload "${TAG}" --repo "${REPO}" --clobber "${ASSETS[@]}"
+else
+  echo ">> Creating GitHub release ${TAG} on ${REPO}..."
+  gh release create "${TAG}" \
+    --repo "${REPO}" \
+    --title "${TAG}" \
+    --notes "Prebuilt whisper.cpp engine binaries for auddio_whisper_engine." \
+    "${ASSETS[@]}"
+fi
 
 echo ""
 echo ">> Done. Paste the SHA-256s above into:"

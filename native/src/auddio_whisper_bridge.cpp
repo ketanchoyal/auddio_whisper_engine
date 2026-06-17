@@ -1,5 +1,6 @@
 #include "auddio_whisper_bridge.h"
 
+#include <exception>
 #include <string>
 #include <vector>
 
@@ -32,24 +33,30 @@ struct awe_context {
 };
 
 awe_context* awe_init(const char* model_path, bool use_gpu) {
-  auto* wrapper = new awe_context();
+  // No exception may cross this C ABI boundary: an uncaught C++ throw would
+  // unwind into Dart FFI with no handler and abort the whole app.
+  try {
+    if (model_path == nullptr) return nullptr;
+    auto* wrapper = new awe_context();
 
-  whisper_context_params cparams = whisper_context_default_params();
-  cparams.use_gpu = use_gpu;
-  cparams.dtw_token_timestamps = true;
-  cparams.dtw_aheads_preset = WHISPER_AHEADS_BASE_EN;
+    whisper_context_params cparams = whisper_context_default_params();
+    cparams.use_gpu = use_gpu;
+    cparams.dtw_token_timestamps = true;
+    cparams.dtw_aheads_preset = WHISPER_AHEADS_BASE_EN;
 
-  wrapper->ctx = whisper_init_from_file_with_params(model_path, cparams);
-  if (wrapper->ctx == nullptr) {
-    wrapper->last_error = "whisper_init_from_file_with_params returned null";
+    wrapper->ctx = whisper_init_from_file_with_params(model_path, cparams);
+    if (wrapper->ctx == nullptr) {
+      wrapper->last_error = "whisper_init_from_file_with_params returned null";
+      return wrapper;
+    }
     return wrapper;
+  } catch (...) {
+    return nullptr;
   }
-  return wrapper;
 }
 
-int32_t awe_transcribe(awe_context* ctx, const float* samples,
-                       int32_t n_samples, int32_t n_threads) {
-  if (ctx == nullptr || ctx->ctx == nullptr) return -1;
+static int32_t awe_transcribe_impl(awe_context* ctx, const float* samples,
+                                   int32_t n_samples, int32_t n_threads) {
   ctx->segments.clear();
   ctx->last_error.clear();
 
@@ -134,6 +141,22 @@ int32_t awe_transcribe(awe_context* ctx, const float* samples,
   }
 
   return 0;
+}
+
+int32_t awe_transcribe(awe_context* ctx, const float* samples,
+                       int32_t n_samples, int32_t n_threads) {
+  if (ctx == nullptr || ctx->ctx == nullptr || samples == nullptr) return -1;
+  try {
+    return awe_transcribe_impl(ctx, samples, n_samples, n_threads);
+  } catch (const std::exception& e) {
+    ctx->segments.clear();
+    ctx->last_error = std::string("native exception: ") + e.what();
+    return -2;
+  } catch (...) {
+    ctx->segments.clear();
+    ctx->last_error = "unknown native exception during transcription";
+    return -3;
+  }
 }
 
 int32_t awe_segment_count(awe_context* ctx) {

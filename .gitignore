@@ -20,9 +20,9 @@ native/third_party/whisper.cpp/
 
 # Prebuilt native binaries (downloaded from GitHub Releases at build time,
 # never committed — mirrors the mpv_audio_kit delivery model).
-/ios/Frameworks/libauddio_whisper.xcframework/
+/ios/Frameworks/auddio_whisper.xcframework/
 /ios/Frameworks/libauddio_whisper_xcframework.zip
-/macos/Frameworks/libauddio_whisper.xcframework/
+/macos/Frameworks/auddio_whisper.xcframework/
 /macos/Frameworks/libauddio_whisper_xcframework.zip
 /android/src/main/jniLibs/
 

@@ -17,6 +17,7 @@ cmake -S "${NATIVE_DIR}" -B "${BUILD_DIR}" -G Xcode \
   -DGGML_METAL=ON \
   -DGGML_METAL_EMBED_LIBRARY=ON \
   -DWHISPER_COREML=ON \
+  -DWHISPER_COREML_ALLOW_FALLBACK=ON \
   -DGGML_OPENMP=OFF
 cmake --build "${BUILD_DIR}" --config Release
 

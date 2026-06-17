@@ -1,5 +1,3 @@
-import java.io.FileOutputStream
-import java.net.URL
 import java.security.MessageDigest
 
 group = "app.audiio.auddio_whisper_engine"
@@ -21,25 +19,23 @@ android {
     }
 }
 
+// Private release: fetched via `gh release download` (authenticated). Requires
+// gh on PATH + 'gh auth login' (or GH_TOKEN/GITHUB_TOKEN in CI).
 val RELEASE_TAG = "whisper-v0.0.1"
-val RELEASE_BASE_URL =
-    "https://github.com/ketanchoyal/auddio_whisper_engine/releases/download/$RELEASE_TAG"
-
-// TODO(release): replace each sha256 after running native/scripts/build_android.sh
-// + checksums.sh and uploading per-ABI libauddio_whisper.so to GitHub Releases.
+val RELEASE_REPO = "ketanchoyal/auddio_whisper_engine"
 val downloadWhisperLibraries = tasks.register("downloadWhisperLibraries") {
     val abis = mapOf(
         "arm64-v8a" to mapOf(
-            "file" to "libauddio_whisper-arm64-v8a.so",
-            "sha256" to "REPLACE_WITH_ARM64_V8A_SHA256"
+            "asset" to "libauddio_whisper-arm64-v8a.so",
+            "sha256" to "803e9dced8f01ce953d3ba4de16c72ab3150b0b24aafa042e09ea6d28e2ac942"
         ),
         "armeabi-v7a" to mapOf(
-            "file" to "libauddio_whisper-armeabi-v7a.so",
-            "sha256" to "REPLACE_WITH_ARMEABI_V7A_SHA256"
+            "asset" to "libauddio_whisper-armeabi-v7a.so",
+            "sha256" to "9919c78011a3e934679f16ce446af296290e2c90f32301633091ae1c92934c96"
         ),
         "x86_64" to mapOf(
-            "file" to "libauddio_whisper-x86_64.so",
-            "sha256" to "REPLACE_WITH_X86_64_SHA256"
+            "asset" to "libauddio_whisper-x86_64.so",
+            "sha256" to "6c2e5dd41360e5eafeec15b794864d78d12c65308e6052cf3a3ea83e7f31d70d"
         )
     )
 
@@ -55,10 +51,21 @@ val downloadWhisperLibraries = tasks.register("downloadWhisperLibraries") {
             if (targetFile.exists() && sha256(targetFile) == expectedHash) return@forEach
             if (targetFile.exists()) targetFile.delete()
 
-            val url = "$RELEASE_BASE_URL/${info["file"]}"
-            println("Downloading libauddio_whisper.so for $abi from $url")
-            URL(url).openStream().use { input ->
-                FileOutputStream(targetFile).use { output -> input.copyTo(output) }
+            val asset = info["asset"]!!
+            println("Downloading $asset for $abi via gh release download")
+            val proc = ProcessBuilder(
+                "gh", "release", "download", RELEASE_TAG,
+                "--repo", RELEASE_REPO,
+                "--pattern", asset,
+                "--output", targetFile.absolutePath,
+                "--clobber"
+            ).redirectErrorStream(true).start()
+            val output = proc.inputStream.bufferedReader().readText()
+            if (proc.waitFor() != 0) {
+                throw GradleException(
+                    "gh release download failed for $abi ($asset). " +
+                        "Ensure gh is installed and authenticated.\n$output"
+                )
             }
             if (sha256(targetFile) != expectedHash) {
                 targetFile.delete()

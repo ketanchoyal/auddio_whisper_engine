@@ -22,32 +22,38 @@ Pod::Spec.new do |s|
   s.frameworks = 'CoreML', 'Foundation', 'Metal', 'Accelerate'
 
   # ── Prebuilt xcframework ──────────────────────────────────────────────────
-  # TODO(release): set RELEASE_TAG + EXPECTED_SHA256 after running
-  # native/scripts/build_ios.sh and native/scripts/checksums.sh, then uploading
-  # the zip to GitHub Releases. Decide the host repo first (see plan open Qs).
   s.prepare_command = <<-CMD
     RELEASE_TAG="whisper-v0.0.1"
-    EXPECTED_SHA256="REPLACE_WITH_IOS_XCFRAMEWORK_SHA256"
-    URL="https://github.com/ketanchoyal/auddio_whisper_engine/releases/download/${RELEASE_TAG}/libauddio_whisper_ios.xcframework.zip"
+    REPO="ketanchoyal/auddio_whisper_engine"
+    ASSET="libauddio_whisper_ios.xcframework.zip"
+    EXPECTED_SHA256="731ddf817ec2e6af281ea34cded67796ac23b3a102bffb7e56833d67738ed1bc"
 
     mkdir -p Frameworks
     ZIP_FILE="Frameworks/libauddio_whisper_xcframework.zip"
     DOWNLOAD_NEEDED=1
 
-    if [ -f "Frameworks/libauddio_whisper.xcframework/Info.plist" ] && [ -f "$ZIP_FILE" ]; then
+    if [ -f "Frameworks/auddio_whisper.xcframework/Info.plist" ] && [ -f "$ZIP_FILE" ]; then
       ACTUAL_SHA256=$(shasum -a 256 "$ZIP_FILE" | awk '{ print $1 }')
       if [ "$ACTUAL_SHA256" = "$EXPECTED_SHA256" ]; then
         DOWNLOAD_NEEDED=0
       else
-        rm -rf "Frameworks/libauddio_whisper.xcframework" "$ZIP_FILE"
+        rm -rf "Frameworks/auddio_whisper.xcframework" "$ZIP_FILE"
       fi
-    elif [ -d "Frameworks/libauddio_whisper.xcframework" ] && [ ! -f "$ZIP_FILE" ]; then
+    elif [ -d "Frameworks/auddio_whisper.xcframework" ] && [ ! -f "$ZIP_FILE" ]; then
       DOWNLOAD_NEEDED=0
     fi
 
     # awe:remote:begin
+    # Private release: gh authenticates (respects GH_TOKEN/GITHUB_TOKEN in CI).
     if [ $DOWNLOAD_NEEDED -eq 1 ]; then
-      curl -L -o "$ZIP_FILE" "$URL"
+      if ! command -v gh >/dev/null 2>&1; then
+        echo "ERROR: gh CLI required for the private release asset. Install gh + 'gh auth login' (or set GH_TOKEN)." >&2
+        exit 1
+      fi
+      gh release download "$RELEASE_TAG" --repo "$REPO" --pattern "$ASSET" --output "$ZIP_FILE" --clobber || {
+        echo "ERROR: gh release download failed for $ASSET" >&2
+        exit 1
+      }
       ACTUAL_SHA256=$(shasum -a 256 "$ZIP_FILE" | awk '{ print $1 }')
       if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
         echo "ERROR: SHA-256 verification failed for $ZIP_FILE"
@@ -56,10 +62,17 @@ Pod::Spec.new do |s|
       fi
       unzip -o "$ZIP_FILE" -d Frameworks/
       rm -f "$ZIP_FILE"
+      # CocoaPods derives the -framework link name from the xcframework
+      # basename, so it MUST equal the inner framework (auddio_whisper.framework).
+      # The release zip unzips to libauddio_whisper.xcframework; rename it.
+      if [ -d "Frameworks/libauddio_whisper.xcframework" ]; then
+        rm -rf "Frameworks/auddio_whisper.xcframework"
+        mv "Frameworks/libauddio_whisper.xcframework" "Frameworks/auddio_whisper.xcframework"
+      fi
     fi
     # awe:remote:end
   CMD
 
-  s.vendored_frameworks = 'Frameworks/libauddio_whisper.xcframework'
+  s.vendored_frameworks = 'Frameworks/auddio_whisper.xcframework'
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES' }
 end
