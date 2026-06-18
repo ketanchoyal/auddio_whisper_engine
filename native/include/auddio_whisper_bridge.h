@@ -1,7 +1,7 @@
 #ifndef AUDDIO_WHISPER_BRIDGE_H
 #define AUDDIO_WHISPER_BRIDGE_H
 
-// C-ABI bridge over whisper.cpp for Audiio chapter transcription.
+// C-ABI bridge over whisper.cpp for Auddio chapter transcription.
 //
 // Design goals:
 //   * Plain C ABI so dart:ffi can bind directly (no C++ name mangling).

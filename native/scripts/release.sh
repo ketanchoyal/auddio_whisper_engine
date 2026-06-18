@@ -1,28 +1,44 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# One-shot release: build all platforms, stage correctly-named artifacts,
-# create the GitHub release, and print the SHA-256s to paste into the
-# podspecs and android/build.gradle.kts.
+# One-shot release: bump the package version, build all platforms, publish a
+# NEW versioned GitHub release, and regenerate release.properties (the single
+# source of truth that the podspecs and android/build.gradle.kts read for the
+# tag + SHA-256s). No manual SHA pasting; no clobbering an existing tag.
 #
-# Prerequisites (run on macOS):
-#   - Xcode + command line tools (iOS/macOS + CoreML coremlc)
-#   - ANDROID_NDK_HOME exported (for build_android.sh)
-#   - gh CLI authenticated (gh auth login)
-#
-# Usage: native/scripts/release.sh [TAG]   (default TAG = whisper-v0.0.1)
+# Prerequisites (macOS): Xcode + CLI tools, gh authenticated, ANDROID_NDK_HOME.
+# Usage: native/scripts/release.sh [major|minor|patch]   (default: patch)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TAG="${1:-whisper-v0.0.1}"
+PKG_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+REL_DIR="${PKG_DIR}/native/build/release"
+PUBSPEC="${PKG_DIR}/pubspec.yaml"
+LOCK_FILE="${PKG_DIR}/release.properties"
 REPO="ketanchoyal/auddio_whisper_engine"
-REL_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)/build/release"
+BUMP="${1:-patch}"
 
-# Sourced (not executed) so its ANDROID_NDK_HOME export reaches this shell.
-# shellcheck source=setup_prereqs.sh
 source "${SCRIPT_DIR}/setup_prereqs.sh" || {
   echo "ERROR: prerequisite setup failed." >&2
   exit 1
 }
+
+current="$(grep -E '^version:' "${PUBSPEC}" | head -1 | sed -E 's/^version:[[:space:]]*//' | tr -d '[:space:]')"
+IFS='.' read -r major minor patch <<< "${current}"
+case "${BUMP}" in
+  major) major=$((major + 1)); minor=0; patch=0 ;;
+  minor) minor=$((minor + 1)); patch=0 ;;
+  patch) patch=$((patch + 1)) ;;
+  *) echo "ERROR: bump must be major|minor|patch (got '${BUMP}')" >&2; exit 1 ;;
+esac
+new_version="${major}.${minor}.${patch}"
+tag="whisper-v${new_version}"
+
+if gh release view "${tag}" --repo "${REPO}" >/dev/null 2>&1; then
+  echo "ERROR: release ${tag} already exists. Bump again or delete it first." >&2
+  exit 1
+fi
+
+echo ">> Releasing ${tag} (was ${current})"
 
 echo ">> Building iOS..."
 "${SCRIPT_DIR}/build_ios.sh"
@@ -31,36 +47,68 @@ echo ">> Building macOS..."
 echo ">> Building Android..."
 "${SCRIPT_DIR}/build_android.sh"
 
-echo ">> Staging artifacts + computing checksums..."
-# Write the log to build/ (not REL_DIR): checksums.sh rm -rf's REL_DIR, which
-# would orphan a log opened inside it.
-mkdir -p "$(dirname "${REL_DIR}")"
-"${SCRIPT_DIR}/checksums.sh" | tee "$(dirname "${REL_DIR}")/SHA256SUMS.txt"
+echo ">> Staging artifacts..."
+"${SCRIPT_DIR}/checksums.sh" >/dev/null
 
-ASSETS=(
-  "${REL_DIR}/libauddio_whisper_ios.xcframework.zip"
-  "${REL_DIR}/libauddio_whisper_macos.xcframework.zip"
-  "${REL_DIR}/libauddio_whisper-arm64-v8a.so"
-  "${REL_DIR}/libauddio_whisper-armeabi-v7a.so"
-  "${REL_DIR}/libauddio_whisper-x86_64.so"
+sha() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    sha256sum "$1" | awk '{print $1}'
+  fi
+}
+
+# Parallel indexed arrays: macOS ships bash 3.2, which has no associative
+# arrays. KEYS[i] names the release.properties suffix; FILES[i] the artifact.
+KEYS=(IOS MACOS ANDROID_ARM64_V8A ANDROID_ARMEABI_V7A ANDROID_X86_64)
+FILES=(
+  "libauddio_whisper_ios.xcframework.zip"
+  "libauddio_whisper_macos.xcframework.zip"
+  "libauddio_whisper-arm64-v8a.so"
+  "libauddio_whisper-armeabi-v7a.so"
+  "libauddio_whisper-x86_64.so"
 )
 
-# Idempotent: create the release if the tag is new, else replace its assets
-# (--clobber) so rebuilds re-upload over an existing tag instead of failing.
-if gh release view "${TAG}" --repo "${REPO}" >/dev/null 2>&1; then
-  echo ">> Release ${TAG} exists on ${REPO}; uploading assets with --clobber..."
-  gh release upload "${TAG}" --repo "${REPO}" --clobber "${ASSETS[@]}"
-else
-  echo ">> Creating GitHub release ${TAG} on ${REPO}..."
-  gh release create "${TAG}" \
-    --repo "${REPO}" \
-    --title "${TAG}" \
-    --notes "Prebuilt whisper.cpp engine binaries for auddio_whisper_engine." \
-    "${ASSETS[@]}"
-fi
+ASSETS=()
+SHAS=()
+idx=0
+while [ "${idx}" -lt "${#KEYS[@]}" ]; do
+  file="${REL_DIR}/${FILES[$idx]}"
+  if [ ! -e "${file}" ]; then
+    echo "ERROR: expected artifact missing: ${file}" >&2
+    exit 1
+  fi
+  SHAS[$idx]="$(sha "${file}")"
+  ASSETS+=("${file}")
+  idx=$((idx + 1))
+done
+
+echo ">> Creating GitHub release ${tag}..."
+gh release create "${tag}" \
+  --repo "${REPO}" \
+  --title "${tag}" \
+  --notes "Prebuilt whisper.cpp engine binaries (${new_version})." \
+  "${ASSETS[@]}"
+
+# Bump the package version only AFTER a successful publish, so a failed
+# release never leaves a phantom version ahead of what's on GitHub.
+sed -i.bak -E "s/^version:.*/version: ${new_version}/" "${PUBSPEC}" && rm -f "${PUBSPEC}.bak"
+
+{
+  echo "# Generated by native/scripts/release.sh - do not edit by hand."
+  echo "# Single source of truth for the prebuilt-binary release, read by the"
+  echo "# ios/macos podspecs and android/build.gradle.kts."
+  echo "RELEASE_TAG=${tag}"
+  echo "RELEASE_REPO=${REPO}"
+  idx=0
+  while [ "${idx}" -lt "${#KEYS[@]}" ]; do
+    echo "SHA_${KEYS[$idx]}=${SHAS[$idx]}"
+    idx=$((idx + 1))
+  done
+} > "${LOCK_FILE}"
 
 echo ""
-echo ">> Done. Paste the SHA-256s above into:"
-echo "   ios/auddio_whisper_engine.podspec   (EXPECTED_SHA256)"
-echo "   macos/auddio_whisper_engine.podspec (EXPECTED_SHA256)"
-echo "   android/build.gradle.kts            (3x per-ABI sha256)"
+echo ">> Released ${tag}. Wrote ${LOCK_FILE}:"
+cat "${LOCK_FILE}"
+echo ""
+echo ">> Commit pubspec.yaml (version: ${new_version}) + release.properties."

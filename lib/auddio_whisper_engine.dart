@@ -1,4 +1,4 @@
-/// Custom whisper.cpp FFI engine for Audiio chapter transcription.
+/// Custom whisper.cpp FFI engine for Auddio chapter transcription.
 ///
 /// On-device speech-to-text with per-word (DTW) timestamps, backed by the
 /// prebuilt `libauddio_whisper` native library loaded via dart:ffi. The C-ABI

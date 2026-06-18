@@ -10,25 +10,34 @@ DEPLOYMENT_TARGET="15.0"
 "${SCRIPT_DIR}/fetch_whisper.sh"
 
 build_slice() {
-  local name="$1" sysroot="$2" archs="$3" simulator="$4"
+  local name="$1" sysroot="$2" archs="$3" accel="$4"
   local dir="${BUILD_ROOT}/${name}"
   rm -rf "${dir}"
+  # The iOS Simulator's Metal driver (MTLSimDevice) aborts in ggml-metal during
+  # buffer init, so the simulator slice is built CPU-only (no Metal/CoreML). The
+  # device slice keeps full Metal + CoreML acceleration. Runtime detection can't
+  # gate this: iOS doesn't expose env vars to Platform.environment, so the only
+  # reliable guard is to omit the Metal code from the simulator binary entirely.
+  local accel_flags
+  if [ "${accel}" = "ON" ]; then
+    accel_flags=(-DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON
+                 -DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON)
+  else
+    accel_flags=(-DGGML_METAL=OFF -DWHISPER_COREML=OFF)
+  fi
   cmake -S "${NATIVE_DIR}" -B "${dir}" -G Xcode \
     -DCMAKE_SYSTEM_NAME=iOS \
     -DCMAKE_OSX_SYSROOT="${sysroot}" \
     -DCMAKE_OSX_ARCHITECTURES="${archs}" \
     -DCMAKE_OSX_DEPLOYMENT_TARGET="${DEPLOYMENT_TARGET}" \
     -DCMAKE_XCODE_ATTRIBUTE_ONLY_ACTIVE_ARCH=NO \
-    -DGGML_METAL=ON \
-    -DGGML_METAL_EMBED_LIBRARY=ON \
-    -DWHISPER_COREML=ON \
-    -DWHISPER_COREML_ALLOW_FALLBACK=ON \
+    "${accel_flags[@]}" \
     -DGGML_OPENMP=OFF
   cmake --build "${dir}" --config Release
 }
 
-build_slice "device" "iphoneos" "arm64" "NO"
-build_slice "simulator" "iphonesimulator" "arm64;x86_64" "YES"
+build_slice "device" "iphoneos" "arm64" "ON"
+build_slice "simulator" "iphonesimulator" "arm64;x86_64" "OFF"
 
 rm -rf "${OUT_DIR}/libauddio_whisper.xcframework"
 mkdir -p "${OUT_DIR}"
