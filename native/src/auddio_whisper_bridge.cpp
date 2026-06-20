@@ -41,6 +41,10 @@ awe_context* awe_init(const char* model_path, bool use_gpu) {
 
     whisper_context_params cparams = whisper_context_default_params();
     cparams.use_gpu = use_gpu;
+    // Must stay false: whisper defaults flash_attn=true, which force-disables
+    // dtw_token_timestamps (our whole purpose) and hangs the Metal kernel on
+    // pre-Apple7 GPUs (e.g. A12Z) that lack simdgroup matrix-mul.
+    cparams.flash_attn = false;
     cparams.dtw_token_timestamps = true;
     cparams.dtw_aheads_preset = WHISPER_AHEADS_BASE_EN;
 
@@ -49,6 +53,24 @@ awe_context* awe_init(const char* model_path, bool use_gpu) {
       wrapper->last_error = "whisper_init_from_file_with_params returned null";
       return wrapper;
     }
+
+    // Warm up on silence so CoreML's one-time first-run compile (5-15s on
+    // older GPUs) happens here, not on the caller's first timed window — which
+    // would blow its timeout, trigger an engine respawn, and OOM a memory-tight
+    // GPU (e.g. A12Z) with two live contexts. Returns fast once compiled.
+    {
+      whisper_full_params wparams =
+          whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+      wparams.n_threads = 1;
+      wparams.print_progress = false;
+      wparams.print_realtime = false;
+      wparams.print_timestamps = false;
+      wparams.no_timestamps = true;
+      std::vector<float> silence(16000, 0.0f);
+      whisper_full(wrapper->ctx, wparams, silence.data(),
+                   static_cast<int>(silence.size()));
+    }
+
     return wrapper;
   } catch (...) {
     return nullptr;
