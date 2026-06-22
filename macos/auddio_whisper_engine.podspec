@@ -28,7 +28,7 @@ Pod::Spec.new do |s|
   s.license          = { :type => 'Proprietary' }
   s.author           = { 'Auddio' => 'audiio.app' }
   s.source           = { :path => '.' }
-  s.platform         = :osx, '12.0'
+  s.platform         = :osx, '13.3'
   s.dependency 'FlutterMacOS'
 
   s.frameworks = 'CoreML', 'Foundation', 'Metal', 'Accelerate'

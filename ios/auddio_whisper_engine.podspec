@@ -29,7 +29,7 @@ Pod::Spec.new do |s|
   s.license          = { :type => 'Proprietary' }
   s.author           = { 'Auddio' => 'audiio.app' }
   s.source           = { :path => '.' }
-  s.platform         = :ios, '15.0'
+  s.platform         = :ios, '16.4'
   s.dependency 'Flutter'
 
   # CoreML + Foundation: CoreML encoder path. Metal + Accelerate: ggml GPU/BLAS.

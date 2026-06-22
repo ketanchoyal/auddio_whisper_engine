@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NATIVE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BUILD_ROOT="${NATIVE_DIR}/build/ios"
 OUT_DIR="${NATIVE_DIR}/build/output"
-DEPLOYMENT_TARGET="15.0"
+DEPLOYMENT_TARGET="16.4"
 
 "${SCRIPT_DIR}/fetch_whisper.sh"
 
