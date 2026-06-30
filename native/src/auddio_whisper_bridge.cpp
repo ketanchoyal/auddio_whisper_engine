@@ -239,6 +239,29 @@ int32_t awe_transcribe_file_window(awe_context* ctx, const char* file_path,
   }
 }
 
+int32_t awe_decode_audio_window_ffi(const char* file_path,
+                                   int64_t start_ms,
+                                   int64_t duration_ms,
+                                   float** out_samples,
+                                   int32_t* out_n_samples,
+                                   char** out_error) {
+  if (file_path == nullptr || out_samples == nullptr || out_n_samples == nullptr || out_error == nullptr) return -1;
+  try {
+    return awe_decode_audio_window(file_path, start_ms, duration_ms, out_samples, out_n_samples, out_error);
+  } catch (const std::exception& e) {
+    *out_samples = nullptr;
+    *out_n_samples = 0;
+    std::string err = std::string("native exception in decode: ") + e.what();
+    *out_error = strdup(err.c_str());
+    return -2;
+  } catch (...) {
+    *out_samples = nullptr;
+    *out_n_samples = 0;
+    *out_error = strdup("unknown native exception during decode");
+    return -3;
+  }
+}
+
 int32_t awe_segment_count(awe_context* ctx) {
   if (ctx == nullptr) return 0;
   return static_cast<int32_t>(ctx->segments.size());

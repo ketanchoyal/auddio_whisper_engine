@@ -63,6 +63,23 @@ AWE_EXPORT int32_t awe_transcribe_file_window(awe_context* ctx,
                                               int64_t duration_ms,
                                               int32_t n_threads);
 
+// Decodes a time window from an audio file directly to a float32 PCM buffer in memory.
+//   file_path     : absolute path to the audiobook file (.mp3, .m4a, .m4b, etc.)
+//   start_ms      : start offset in the file (milliseconds)
+//   duration_ms   : duration of the window to decode (milliseconds)
+//   out_samples   : pointer to receive the allocated float* samples buffer (16kHz mono)
+//   out_n_samples : pointer to receive the number of samples decoded
+//   out_error     : pointer to receive any error message string
+//
+// Callers must free the returned out_samples buffer using free() when done.
+// Returns 0 on success, non-zero on failure.
+AWE_EXPORT int32_t awe_decode_audio_window_ffi(const char* file_path,
+                                               int64_t start_ms,
+                                               int64_t duration_ms,
+                                               float** out_samples,
+                                               int32_t* out_n_samples,
+                                               char** out_error);
+
 // ---- Segment accessors (valid after a successful transcription) -----------
 AWE_EXPORT int32_t awe_segment_count(awe_context* ctx);
 AWE_EXPORT const char* awe_segment_text(awe_context* ctx, int32_t i_segment);

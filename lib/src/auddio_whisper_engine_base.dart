@@ -1,4 +1,5 @@
 import 'dart:ffi';
+import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
@@ -64,6 +65,63 @@ class AuddioWhisperEngine {
       return _readSegments();
     } finally {
       calloc.free(pathPtr);
+    }
+  }
+
+  /// Decodes a time window from an audio file directly in C++ to a Float32List.
+  ///
+  /// This can be used by any transcription engine (including sherpa_onnx) to
+  /// decode audio in memory without spawning FFmpeg or writing WAV files.
+  static Float32List decodeAudioWindow({
+    required String filePath,
+    required int startMs,
+    required int durationMs,
+    DynamicLibrary? customLibrary,
+  }) {
+    final bindings = WhisperBindings(customLibrary ?? openWhisperLibrary());
+    final pathPtr = filePath.toNativeUtf8();
+    
+    // Allocate pointers for the return values
+    final outSamplesPtr = calloc<Pointer<Float>>();
+    final outNSamplesPtr = calloc<Int32>();
+    final outErrorPtr = calloc<Pointer<Char>>();
+    
+    try {
+      final rc = bindings.decodeAudioWindow(
+        pathPtr.cast<Char>(),
+        startMs,
+        durationMs,
+        outSamplesPtr,
+        outNSamplesPtr,
+        outErrorPtr,
+      );
+      
+      if (rc != 0) {
+        final errPtr = outErrorPtr.value;
+        final errMsg = errPtr != nullptr ? errPtr.cast<Utf8>().toDartString() : 'Unknown error';
+        if (errPtr != nullptr) calloc.free(errPtr);
+        throw WhisperEngineException('awe_decode_audio_window failed (rc=$rc): $errMsg');
+      }
+      
+      final nSamples = outNSamplesPtr.value;
+      final samplesPtr = outSamplesPtr.value;
+      if (samplesPtr == nullptr || nSamples <= 0) {
+        return Float32List(0);
+      }
+      
+      // Copy the float samples into a Dart Float32List
+      final list = Float32List(nSamples);
+      list.setAll(0, samplesPtr.asTypedList(nSamples));
+      
+      // Free the natively allocated buffer
+      calloc.free(samplesPtr);
+      
+      return list;
+    } finally {
+      calloc.free(pathPtr);
+      calloc.free(outSamplesPtr);
+      calloc.free(outNSamplesPtr);
+      calloc.free(outErrorPtr);
     }
   }
 
