@@ -1,13 +1,13 @@
 import 'dart:ffi';
 import 'dart:io';
 
-typedef AweInitC = Pointer<Void> Function(Pointer<Char>, Bool);
-typedef AweInitDart = Pointer<Void> Function(Pointer<Char>, bool);
+typedef AweInitC = Pointer<Void> Function(Pointer<Char>, Bool, Int32);
+typedef AweInitDart = Pointer<Void> Function(Pointer<Char>, bool, int);
 
-typedef AweTranscribeC = Int32 Function(
-    Pointer<Void>, Pointer<Float>, Int32, Int32);
-typedef AweTranscribeDart = int Function(
-    Pointer<Void>, Pointer<Float>, int, int);
+typedef AweTranscribeFileWindowC = Int32 Function(
+    Pointer<Void>, Pointer<Char>, Int64, Int64, Int32);
+typedef AweTranscribeFileWindowDart = int Function(
+    Pointer<Void>, Pointer<Char>, int, int, int);
 
 typedef AweSegCountC = Int32 Function(Pointer<Void>);
 typedef AweSegCountDart = int Function(Pointer<Void>);
@@ -36,8 +36,9 @@ typedef AweFreeDart = void Function(Pointer<Void>);
 class WhisperBindings {
   WhisperBindings(DynamicLibrary lib)
       : init = lib.lookupFunction<AweInitC, AweInitDart>('awe_init'),
-        transcribe = lib
-            .lookupFunction<AweTranscribeC, AweTranscribeDart>('awe_transcribe'),
+        transcribeFileWindow = lib.lookupFunction<
+            AweTranscribeFileWindowC,
+            AweTranscribeFileWindowDart>('awe_transcribe_file_window'),
         segmentCount = lib
             .lookupFunction<AweSegCountC, AweSegCountDart>('awe_segment_count'),
         segmentText = lib
@@ -59,7 +60,7 @@ class WhisperBindings {
         free = lib.lookupFunction<AweFreeC, AweFreeDart>('awe_free');
 
   final AweInitDart init;
-  final AweTranscribeDart transcribe;
+  final AweTranscribeFileWindowDart transcribeFileWindow;
   final AweSegCountDart segmentCount;
   final AweSegTextDart segmentText;
   final AweSegTimeDart segmentT0Ms;

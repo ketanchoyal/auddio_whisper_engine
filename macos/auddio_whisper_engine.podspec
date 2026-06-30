@@ -31,7 +31,7 @@ Pod::Spec.new do |s|
   s.platform         = :osx, '13.3'
   s.dependency 'FlutterMacOS'
 
-  s.frameworks = 'CoreML', 'Foundation', 'Metal', 'Accelerate'
+  s.frameworks = 'CoreML', 'Foundation', 'Metal', 'Accelerate', 'AudioToolbox'
 
   s.prepare_command = <<-CMD
     RELEASE_TAG="#{_tag}"

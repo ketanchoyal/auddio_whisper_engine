@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "whisper.h"
+#include "awe_audio_decoder.h"
 
 namespace {
 
@@ -32,7 +33,7 @@ struct awe_context {
   std::string last_error;
 };
 
-awe_context* awe_init(const char* model_path, bool use_gpu) {
+awe_context* awe_init(const char* model_path, bool use_gpu, int32_t dtw_aheads_preset) {
   // No exception may cross this C ABI boundary: an uncaught C++ throw would
   // unwind into Dart FFI with no handler and abort the whole app.
   try {
@@ -46,7 +47,41 @@ awe_context* awe_init(const char* model_path, bool use_gpu) {
     // pre-Apple7 GPUs (e.g. A12Z) that lack simdgroup matrix-mul.
     cparams.flash_attn = false;
     cparams.dtw_token_timestamps = true;
-    cparams.dtw_aheads_preset = WHISPER_AHEADS_BASE_EN;
+    
+    if (dtw_aheads_preset >= 0) {
+      cparams.dtw_aheads_preset = static_cast<whisper_alignment_heads_preset>(dtw_aheads_preset);
+    } else {
+      // Detect the appropriate alignment heads preset based on the model filename.
+      // If the model doesn't match any known preset, we fall back to BASE_EN.
+      std::string path_str = model_path;
+      if (path_str.find("tiny.en") != std::string::npos) {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_TINY_EN;
+      } else if (path_str.find("tiny") != std::string::npos) {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_TINY;
+      } else if (path_str.find("base.en") != std::string::npos) {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_BASE_EN;
+      } else if (path_str.find("base") != std::string::npos) {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_BASE;
+      } else if (path_str.find("small.en") != std::string::npos) {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_SMALL_EN;
+      } else if (path_str.find("small") != std::string::npos) {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_SMALL;
+      } else if (path_str.find("medium.en") != std::string::npos) {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_MEDIUM_EN;
+      } else if (path_str.find("medium") != std::string::npos) {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_MEDIUM;
+      } else if (path_str.find("large-v3-turbo") != std::string::npos) {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_LARGE_V3_TURBO;
+      } else if (path_str.find("large-v3") != std::string::npos) {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_LARGE_V3;
+      } else if (path_str.find("large-v2") != std::string::npos) {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_LARGE_V2;
+      } else if (path_str.find("large") != std::string::npos) {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_LARGE_V1;
+      } else {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_BASE_EN;
+      }
+    }
 
     wrapper->ctx = whisper_init_from_file_with_params(model_path, cparams);
     if (wrapper->ctx == nullptr) {
@@ -146,15 +181,16 @@ static int32_t awe_transcribe_impl(awe_context* ctx, const float* samples,
         if (piece.empty()) continue;
         current.text = piece;
         current.t0_ms = tok_t0;
-        current.t1_ms = tok_t1;
+        current.t1_ms = std::max(tok_t0, tok_t1);
         have_current = true;
       } else {
         if (!have_current) {
           current.t0_ms = tok_t0;
+          current.t1_ms = tok_t0;
           have_current = true;
         }
         current.text += piece;
-        current.t1_ms = tok_t1;
+        current.t1_ms = std::max({current.t0_ms, current.t1_ms, tok_t1});
       }
     }
     flush();
@@ -165,18 +201,40 @@ static int32_t awe_transcribe_impl(awe_context* ctx, const float* samples,
   return 0;
 }
 
-int32_t awe_transcribe(awe_context* ctx, const float* samples,
-                       int32_t n_samples, int32_t n_threads) {
-  if (ctx == nullptr || ctx->ctx == nullptr || samples == nullptr) return -1;
+int32_t awe_transcribe_file_window(awe_context* ctx, const char* file_path,
+                                   int64_t start_ms, int64_t duration_ms,
+                                   int32_t n_threads) {
+  if (ctx == nullptr || ctx->ctx == nullptr || file_path == nullptr) return -1;
   try {
-    return awe_transcribe_impl(ctx, samples, n_samples, n_threads);
+    // Decode the audio window using the platform-native decoder.
+    float* samples = nullptr;
+    int32_t n_samples = 0;
+    char* decode_error = nullptr;
+
+    int rc = awe_decode_audio_window(file_path, start_ms, duration_ms,
+                                     &samples, &n_samples, &decode_error);
+    if (rc != 0 || samples == nullptr || n_samples <= 0) {
+      ctx->segments.clear();
+      ctx->last_error = decode_error
+          ? std::string("audio decode failed: ") + decode_error
+          : "audio decode failed (unknown error)";
+      if (decode_error) free(decode_error);
+      if (samples) free(samples);
+      return -4;
+    }
+    if (decode_error) free(decode_error);
+
+    // Transcribe the decoded PCM using the existing implementation.
+    int32_t result = awe_transcribe_impl(ctx, samples, n_samples, n_threads);
+    free(samples);
+    return result;
   } catch (const std::exception& e) {
     ctx->segments.clear();
-    ctx->last_error = std::string("native exception: ") + e.what();
+    ctx->last_error = std::string("native exception in file window: ") + e.what();
     return -2;
   } catch (...) {
     ctx->segments.clear();
-    ctx->last_error = "unknown native exception during transcription";
+    ctx->last_error = "unknown native exception in file window transcription";
     return -3;
   }
 }

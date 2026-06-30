@@ -33,7 +33,8 @@ Pod::Spec.new do |s|
   s.dependency 'Flutter'
 
   # CoreML + Foundation: CoreML encoder path. Metal + Accelerate: ggml GPU/BLAS.
-  s.frameworks = 'CoreML', 'Foundation', 'Metal', 'Accelerate'
+  # AudioToolbox: native in-memory audio decoding (ExtAudioFile).
+  s.frameworks = 'CoreML', 'Foundation', 'Metal', 'Accelerate', 'AudioToolbox'
 
   # ── Prebuilt xcframework ──────────────────────────────────────────────────
   s.prepare_command = <<-CMD

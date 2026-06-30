@@ -17,8 +17,18 @@ set(WHISPER_BUILD_SERVER OFF CACHE BOOL "" FORCE)
 
 add_subdirectory("${WHISPER_DIR}" "${CMAKE_BINARY_DIR}/whisper" EXCLUDE_FROM_ALL)
 
+# Platform-specific audio decoder source.
+if(APPLE)
+  set(AWE_DECODER_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/awe_audio_decoder_apple.mm")
+elseif(ANDROID)
+  set(AWE_DECODER_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/awe_audio_decoder_android.cpp")
+else()
+  message(FATAL_ERROR "Unsupported platform: no audio decoder implementation available.")
+endif()
+
 add_library(auddio_whisper SHARED
   "${CMAKE_CURRENT_SOURCE_DIR}/src/auddio_whisper_bridge.cpp"
+  "${AWE_DECODER_SRC}"
 )
 
 target_include_directories(auddio_whisper PRIVATE
@@ -28,6 +38,14 @@ target_include_directories(auddio_whisper PRIVATE
 )
 
 target_link_libraries(auddio_whisper PRIVATE whisper)
+
+# Link platform frameworks for the audio decoder.
+if(APPLE)
+  find_library(AUDIO_TOOLBOX AudioToolbox REQUIRED)
+  target_link_libraries(auddio_whisper PRIVATE ${AUDIO_TOOLBOX})
+elseif(ANDROID)
+  target_link_libraries(auddio_whisper PRIVATE mediandk)
+endif()
 
 set_target_properties(auddio_whisper PROPERTIES
   C_VISIBILITY_PRESET hidden

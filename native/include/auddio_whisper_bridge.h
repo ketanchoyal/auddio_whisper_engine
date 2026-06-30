@@ -10,15 +10,14 @@
 //     side stays trivial and the FFI boundary stays cheap.
 //   * Chapter-relative timestamps in milliseconds (the app adds its own
 //     window base offset on the Dart side).
-//
-// Audio contract: callers pass mono float32 PCM normalized to [-1, 1] at
-// 16 kHz (matches the app's FFmpeg window decode: -ac 1 -ar 16000).
+//   * In-memory audio decoding via platform-native APIs (ExtAudioFile on
+//     Apple, AMediaCodec on Android) — no FFmpeg, no temp files.
 //
 // Memory ownership: all `const char*` returned by accessors are owned by the
-// awe_context and remain valid until the next awe_transcribe() call on that
-// context or awe_free(). Callers MUST copy strings they need to retain. None
-// of these functions are thread-safe for a single context; the app drives one
-// context per worker isolate.
+// awe_context and remain valid until the next awe_transcribe_file_window()
+// call on that context or awe_free(). Callers MUST copy strings they need to
+// retain. None of these functions are thread-safe for a single context; the
+// app drives one context per worker isolate.
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -37,26 +36,34 @@ extern "C" {
 typedef struct awe_context awe_context;
 
 // Initializes the engine from a ggml .bin model file.
-//   model_path : absolute path to e.g. ggml-base.en.bin.
-//   use_gpu    : enable the GPU backend (Metal on Apple). Ignored where the
-//                binary was built CPU-only (Android).
-// CoreML has NO runtime switch: whisper.cpp activates it automatically when the
-// binary is built with CoreML AND a compiled `<model>-encoder.mlmodelc` folder
-// sits adjacent to this .bin. To disable CoreML (e.g. after a failed warmup),
-// the caller must omit/remove that .mlmodelc folder before calling awe_init.
+//   model_path        : absolute path to e.g. ggml-base.en.bin.
+//   use_gpu           : enable the GPU backend (Metal on Apple).
+//   dtw_aheads_preset : the alignment heads preset to use (from the
+//                       whisper_alignment_heads_preset enum). Pass -1 to
+//                       automatically detect it based on the model filename.
 // Returns NULL on failure.
-AWE_EXPORT awe_context* awe_init(const char* model_path, bool use_gpu);
+AWE_EXPORT awe_context* awe_init(const char* model_path, bool use_gpu, int32_t dtw_aheads_preset);
 
-// Runs a full transcription pass over [samples, samples+n_samples).
-// Configures DTW token timestamps (base.en alignment heads) so word times are
-// available afterwards. Returns 0 on success, non-zero on failure (inspect
-// awe_last_error). Results are retained on the context until the next call.
-AWE_EXPORT int32_t awe_transcribe(awe_context* ctx,
-                                  const float* samples,
-                                  int32_t n_samples,
-                                  int32_t n_threads);
 
-// ---- Segment accessors (valid after a successful awe_transcribe) ----------
+// Decodes a time window from an audio file directly in C++ (using platform
+// native APIs: ExtAudioFile on Apple, AMediaCodec on Android), then runs
+// whisper transcription on the decoded PCM — all in one call. This bypasses
+// Dart-side FFmpeg process spawning and temporary WAV file I/O entirely.
+//
+//   file_path   : absolute path to the audiobook file (.mp3, .m4a, .m4b, etc.)
+//   start_ms    : start offset in the file (milliseconds)
+//   duration_ms : duration of the window to decode and transcribe (milliseconds)
+//   n_threads   : number of CPU threads for the whisper decoder
+//
+// Returns 0 on success, non-zero on failure (inspect awe_last_error).
+// Segment/word accessors work identically after this call.
+AWE_EXPORT int32_t awe_transcribe_file_window(awe_context* ctx,
+                                              const char* file_path,
+                                              int64_t start_ms,
+                                              int64_t duration_ms,
+                                              int32_t n_threads);
+
+// ---- Segment accessors (valid after a successful transcription) -----------
 AWE_EXPORT int32_t awe_segment_count(awe_context* ctx);
 AWE_EXPORT const char* awe_segment_text(awe_context* ctx, int32_t i_segment);
 AWE_EXPORT int64_t awe_segment_t0_ms(awe_context* ctx, int32_t i_segment);

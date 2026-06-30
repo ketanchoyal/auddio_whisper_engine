@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:auddio_whisper_engine/auddio_whisper_engine.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -43,15 +41,5 @@ void main() {
     expect(segment.words.single.text, 'hello');
     expect(segment.words.single.startMs, 100);
     expect(segment.words.single.endMs, 400);
-  });
-
-  test('empty samples short-circuit without touching native code', () {
-    if (!libraryAvailable()) {
-      markTestSkipped('native libauddio_whisper not available');
-      return;
-    }
-    // Cannot construct a real engine without a model, so just assert the
-    // contract type exists and Float32List is the expected input shape.
-    expect(Float32List(0), isEmpty);
   });
 }

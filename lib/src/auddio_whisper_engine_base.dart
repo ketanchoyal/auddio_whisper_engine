@@ -1,5 +1,4 @@
 import 'dart:ffi';
-import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
@@ -15,11 +14,13 @@ class AuddioWhisperEngine {
   static AuddioWhisperEngine open({
     required String modelPath,
     bool useGpu = true,
+    int dtwAheadsPreset = -1,
+    DynamicLibrary? customLibrary,
   }) {
-    final bindings = WhisperBindings(openWhisperLibrary());
+    final bindings = WhisperBindings(customLibrary ?? openWhisperLibrary());
     final pathPtr = modelPath.toNativeUtf8();
     try {
-      final ctx = bindings.init(pathPtr.cast<Char>(), useGpu);
+      final ctx = bindings.init(pathPtr.cast<Char>(), useGpu, dtwAheadsPreset);
       if (ctx == nullptr) {
         throw const WhisperEngineException('awe_init returned null');
       }
@@ -31,26 +32,38 @@ class AuddioWhisperEngine {
 
   bool get isDisposed => _ctx == nullptr;
 
-  List<WhisperSegment> transcribe(
-    Float32List samples, {
+  /// Decodes a time window from an audio file and transcribes it, all in C++.
+  ///
+  /// This bypasses Dart-side FFmpeg process spawning and temporary WAV file I/O
+  /// entirely. The native layer uses platform APIs (ExtAudioFile on Apple,
+  /// AMediaCodec on Android) to decode directly to 16kHz mono float32 PCM in
+  /// memory, then feeds it to whisper.cpp.
+  List<WhisperSegment> transcribeFileWindow({
+    required String filePath,
+    required int startMs,
+    required int durationMs,
     int nThreads = 4,
   }) {
     if (_ctx == nullptr) {
       throw const WhisperEngineException('engine disposed');
     }
-    if (samples.isEmpty) return const <WhisperSegment>[];
-
-    final buffer = calloc<Float>(samples.length);
+    final pathPtr = filePath.toNativeUtf8();
     try {
-      buffer.asTypedList(samples.length).setAll(0, samples);
-      final rc =
-          _bindings.transcribe(_ctx, buffer, samples.length, nThreads);
+      final rc = _bindings.transcribeFileWindow(
+        _ctx,
+        pathPtr.cast<Char>(),
+        startMs,
+        durationMs,
+        nThreads,
+      );
       if (rc != 0) {
-        throw WhisperEngineException(_readError() ?? 'awe_transcribe rc=$rc');
+        throw WhisperEngineException(
+          _readError() ?? 'awe_transcribe_file_window rc=$rc',
+        );
       }
       return _readSegments();
     } finally {
-      calloc.free(buffer);
+      calloc.free(pathPtr);
     }
   }
 

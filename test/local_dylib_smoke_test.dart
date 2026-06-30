@@ -15,16 +15,22 @@ void main() {
   final dylibPath = Platform.environment['AWE_DYLIB'];
 
   test('built dylib exposes a callable awe_* C-ABI', () {
-    if (dylibPath == null || !File(dylibPath).existsSync()) {
-      markTestSkipped('set AWE_DYLIB to the built framework binary path');
-      return;
+    var path = dylibPath;
+    if (path == null || !File(path).existsSync()) {
+      final localDylib = 'native/build/macos/Release/auddio_whisper.framework/auddio_whisper';
+      if (File(localDylib).existsSync()) {
+        path = localDylib;
+      } else {
+        markTestSkipped('set AWE_DYLIB to the built framework binary path');
+        return;
+      }
     }
 
-    final bindings = WhisperBindings(DynamicLibrary.open(dylibPath));
+    final bindings = WhisperBindings(DynamicLibrary.open(path));
 
     final badPath = '/definitely/missing/model.bin'.toNativeUtf8();
     try {
-      final ctx = bindings.init(badPath.cast<Char>(), false);
+      final ctx = bindings.init(badPath.cast<Char>(), false, -1);
       expect(ctx, isNot(nullptr),
           reason: 'awe_init returns a wrapper even on load failure');
 
