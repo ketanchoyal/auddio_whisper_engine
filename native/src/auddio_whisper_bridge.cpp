@@ -3,6 +3,7 @@
 #include <exception>
 #include <string>
 #include <vector>
+#include <cstring>
 
 #include "whisper.h"
 #include "awe_audio_decoder.h"
@@ -223,6 +224,22 @@ int32_t awe_transcribe_file_window(awe_context* ctx, const char* file_path,
       return -4;
     }
     if (decode_error) free(decode_error);
+
+    // whisper.cpp's median_filter asserts that the filter width (typically 7)
+    // is strictly less than the number of audio frames. To prevent a SIGABRT crash
+    // on extremely short audio clips/windows (e.g. final window or short files),
+    // pad the decoded samples with silence to be at least 2 seconds (32,000 samples).
+    int32_t min_samples = 32000;
+    if (n_samples < min_samples) {
+      float* padded_samples = static_cast<float*>(malloc(min_samples * sizeof(float)));
+      if (padded_samples != nullptr) {
+        memcpy(padded_samples, samples, n_samples * sizeof(float));
+        memset(padded_samples + n_samples, 0, (min_samples - n_samples) * sizeof(float));
+        free(samples);
+        samples = padded_samples;
+        n_samples = min_samples;
+      }
+    }
 
     // Transcribe the decoded PCM using the existing implementation.
     int32_t result = awe_transcribe_impl(ctx, samples, n_samples, n_threads);
