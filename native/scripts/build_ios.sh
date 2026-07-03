@@ -39,11 +39,11 @@ build_slice() {
 build_slice "device" "iphoneos" "arm64" "ON"
 build_slice "simulator" "iphonesimulator" "arm64;x86_64" "OFF"
 
-rm -rf "${OUT_DIR}/libauddio_whisper.xcframework"
-mkdir -p "${OUT_DIR}"
+rm -rf "${OUT_DIR}/ios/auddio_whisper.xcframework"
+mkdir -p "${OUT_DIR}/ios"
 xcodebuild -create-xcframework \
   -framework "${BUILD_ROOT}/device/Release-iphoneos/auddio_whisper.framework" \
   -framework "${BUILD_ROOT}/simulator/Release-iphonesimulator/auddio_whisper.framework" \
-  -output "${OUT_DIR}/libauddio_whisper.xcframework"
+  -output "${OUT_DIR}/ios/auddio_whisper.xcframework"
 
-echo "Built ${OUT_DIR}/libauddio_whisper.xcframework"
+echo "Built ${OUT_DIR}/ios/auddio_whisper.xcframework"

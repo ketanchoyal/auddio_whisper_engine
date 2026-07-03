@@ -59,17 +59,26 @@ Pod::Spec.new do |s|
     fi
 
     # awe:remote:begin
-    # Private release: gh authenticates (respects GH_TOKEN/GITHUB_TOKEN in CI).
+    # Try public curl download first, fallback to gh CLI if it fails.
     if [ $DOWNLOAD_NEEDED -eq 1 ]; then
       rm -rf "Frameworks/auddio_whisper.xcframework" "$ZIP_FILE" "$MARKER"
-      if ! command -v gh >/dev/null 2>&1; then
-        echo "ERROR: gh CLI required for the private release asset. Install gh + 'gh auth login' (or set GH_TOKEN)." >&2
-        exit 1
+      
+      URL="https://github.com/${REPO}/releases/download/${RELEASE_TAG}/${ASSET}"
+      echo "Downloading $ASSET from $URL..."
+      if curl -L -s -f -o "$ZIP_FILE" "$URL"; then
+        echo "Download successful."
+      else
+        echo "Public download failed. Falling back to gh CLI..."
+        if ! command -v gh >/dev/null 2>&1; then
+          echo "ERROR: curl failed and gh CLI is not installed." >&2
+          exit 1
+        fi
+        gh release download "$RELEASE_TAG" --repo "$REPO" --pattern "$ASSET" --output "$ZIP_FILE" --clobber || {
+          echo "ERROR: gh release download failed for $ASSET" >&2
+          exit 1
+        }
       fi
-      gh release download "$RELEASE_TAG" --repo "$REPO" --pattern "$ASSET" --output "$ZIP_FILE" --clobber || {
-        echo "ERROR: gh release download failed for $ASSET" >&2
-        exit 1
-      }
+
       ACTUAL_SHA256=$(shasum -a 256 "$ZIP_FILE" | awk '{ print $1 }')
       if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
         echo "ERROR: SHA-256 verification failed for $ZIP_FILE"
@@ -78,9 +87,7 @@ Pod::Spec.new do |s|
       fi
       unzip -o "$ZIP_FILE" -d Frameworks/
       rm -f "$ZIP_FILE"
-      # CocoaPods derives the -framework link name from the xcframework
-      # basename, so it MUST equal the inner framework (auddio_whisper.framework).
-      # The release zip unzips to libauddio_whisper.xcframework; rename it.
+      # Legacy renaming fallback: if zip unzips to libauddio_whisper.xcframework, rename it to auddio_whisper.xcframework.
       if [ -d "Frameworks/libauddio_whisper.xcframework" ]; then
         rm -rf "Frameworks/auddio_whisper.xcframework"
         mv "Frameworks/libauddio_whisper.xcframework" "Frameworks/auddio_whisper.xcframework"

@@ -29,10 +29,10 @@ zip_xcframework() {
 }
 
 zip_xcframework "ios" \
-  "${OUT_DIR}/libauddio_whisper.xcframework" \
+  "${OUT_DIR}/ios/auddio_whisper.xcframework" \
   "libauddio_whisper_ios.xcframework.zip"
 zip_xcframework "macos" \
-  "${OUT_DIR}/libauddio_whisper.macos.xcframework" \
+  "${OUT_DIR}/macos/auddio_whisper.xcframework" \
   "libauddio_whisper_macos.xcframework.zip"
 
 for abi in arm64-v8a armeabi-v7a x86_64; do

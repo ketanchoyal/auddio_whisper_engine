@@ -60,20 +60,31 @@ val downloadWhisperLibraries = tasks.register("downloadWhisperLibraries") {
             if (targetFile.exists()) targetFile.delete()
 
             val asset = info["asset"]!!
-            println("Downloading $asset for $abi via gh release download")
-            val proc = ProcessBuilder(
-                "gh", "release", "download", RELEASE_TAG,
-                "--repo", RELEASE_REPO,
-                "--pattern", asset,
-                "--output", targetFile.absolutePath,
-                "--clobber"
-            ).redirectErrorStream(true).start()
-            val output = proc.inputStream.bufferedReader().readText()
-            if (proc.waitFor() != 0) {
-                throw GradleException(
-                    "gh release download failed for $abi ($asset). " +
-                        "Ensure gh is installed and authenticated.\n$output"
-                )
+            val downloadUrl = "https://github.com/$RELEASE_REPO/releases/download/$RELEASE_TAG/$asset"
+            println("Downloading $asset for $abi from $downloadUrl")
+            try {
+                java.net.URL(downloadUrl).openStream().use { input ->
+                    targetFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                println("Download successful.")
+            } catch (e: Exception) {
+                println("Public download failed: ${e.message}. Falling back to gh CLI...")
+                val proc = ProcessBuilder(
+                    "gh", "release", "download", RELEASE_TAG,
+                    "--repo", RELEASE_REPO,
+                    "--pattern", asset,
+                    "--output", targetFile.absolutePath,
+                    "--clobber"
+                ).redirectErrorStream(true).start()
+                val output = proc.inputStream.bufferedReader().readText()
+                if (proc.waitFor() != 0) {
+                    throw GradleException(
+                        "Download failed for $abi ($asset). Both public URL and gh fallback failed.\n" +
+                            "Error: ${e.message}\ngh output: $output"
+                    )
+                }
             }
             if (sha256(targetFile) != expectedHash) {
                 targetFile.delete()

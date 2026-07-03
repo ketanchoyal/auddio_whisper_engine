@@ -31,32 +31,29 @@ errors out if the tag already exists).
 ### Prerequisites (macOS)
 
 - Xcode + command line tools (needed for iOS/macOS + CoreML).
-- `gh` authenticated (`gh auth login`) — the release repo is private.
+- `gh` authenticated (`gh auth login`) — required only for the developer publishing new GitHub releases. Consumers do not need `gh` since the repo is public.
 - Android NDK. `release.sh` sources `setup_prereqs.sh`, which auto-installs the
   CLI tools and resolves `ANDROID_NDK_HOME` for you.
 
 ### After releasing
 
-Commit the two changed files so consumers pick up the new build:
+Commit the changed files so consumers pick up the new build:
 
 ```bash
-git add pubspec.yaml release.properties
+git add pubspec.yaml release.properties ios/auddio_whisper_engine/Package.swift macos/auddio_whisper_engine/Package.swift
 git commit -m "release whisper-v<version>"
 git push
 ```
 
 ## How consumers get the binary
 
-`release.properties` is the source of truth. None of the build files hardcode a
-tag or checksum — they read it:
+`release.properties` and the `Package.swift` manifests are the sources of truth:
 
-- **iOS / macOS** — the podspec's `prepare_command` downloads the xcframework
-  for `RELEASE_TAG` via `gh`, verifies its SHA-256, and vendors it.
-- **Android** — `build.gradle.kts` downloads each ABI `.so` via `gh`, verifies
-  its SHA-256, and drops it into `jniLibs/`.
+- **iOS / macOS (SPM)** — Swift Package Manager downloads the prebuilt binary framework directly from the GitHub Release assets based on the URL and checksum defined in `Package.swift`.
+- **iOS / macOS (CocoaPods fallback)** — The podspec's `prepare_command` downloads the xcframework zip via a public HTTPS URL using `curl`, verifies its SHA-256, and vendors it.
+- **Android** — `build.gradle.kts` downloads each ABI `.so` via a public HTTPS URL in Kotlin, verifies its SHA-256, and drops it into `jniLibs/`.
 
-So updating the engine is just: run `release.sh`, commit, push. No manual SHA
-editing anywhere.
+No manual SHA editing is needed; everything is handled dynamically or rewritten during the release process.
 
 ## Layout
 

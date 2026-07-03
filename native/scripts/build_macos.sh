@@ -21,10 +21,10 @@ cmake -S "${NATIVE_DIR}" -B "${BUILD_DIR}" -G Xcode \
   -DGGML_OPENMP=OFF
 cmake --build "${BUILD_DIR}" --config Release
 
-rm -rf "${OUT_DIR}/libauddio_whisper.macos.xcframework"
-mkdir -p "${OUT_DIR}"
+rm -rf "${OUT_DIR}/macos/auddio_whisper.xcframework"
+mkdir -p "${OUT_DIR}/macos"
 xcodebuild -create-xcframework \
   -framework "${BUILD_DIR}/Release/auddio_whisper.framework" \
-  -output "${OUT_DIR}/libauddio_whisper.macos.xcframework"
+  -output "${OUT_DIR}/macos/auddio_whisper.xcframework"
 
-echo "Built ${OUT_DIR}/libauddio_whisper.macos.xcframework"
+echo "Built ${OUT_DIR}/macos/auddio_whisper.xcframework"
