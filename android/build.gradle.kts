@@ -1,3 +1,4 @@
+import java.net.URL
 import java.security.MessageDigest
 import java.util.Properties
 
@@ -63,7 +64,7 @@ val downloadWhisperLibraries = tasks.register("downloadWhisperLibraries") {
             val downloadUrl = "https://github.com/$RELEASE_REPO/releases/download/$RELEASE_TAG/$asset"
             println("Downloading $asset for $abi from $downloadUrl")
             try {
-                java.net.URL(downloadUrl).openStream().use { input ->
+                URL(downloadUrl).openStream().use { input ->
                     targetFile.outputStream().use { output ->
                         input.copyTo(output)
                     }
