@@ -225,20 +225,23 @@ int32_t awe_transcribe_file_window(awe_context* ctx, const char* file_path,
     }
     if (decode_error) free(decode_error);
 
-    // whisper.cpp's median_filter asserts that the filter width (typically 7)
-    // is strictly less than the number of audio frames. To prevent a SIGABRT crash
-    // on extremely short audio clips/windows (e.g. final window or short files),
-    // pad the decoded samples with silence to be at least 2 seconds (32,000 samples).
-    int32_t min_samples = 32000;
-    if (n_samples < min_samples) {
-      float* padded_samples = static_cast<float*>(malloc(min_samples * sizeof(float)));
-      if (padded_samples != nullptr) {
-        memcpy(padded_samples, samples, n_samples * sizeof(float));
-        memset(padded_samples + n_samples, 0, (min_samples - n_samples) * sizeof(float));
-        free(samples);
-        samples = padded_samples;
-        n_samples = min_samples;
-      }
+    // Stock whisper.cpp's median_filter asserts that filter_width (7) is strictly
+    // less than n_audio_tokens (n_frames / 2). On unpadded audio windows, the final
+    // iteration step near the end of a window can have seek_end - seek <= 14 frames,
+    // causing an assertion failure (7 < 5) and process abort.
+    // By appending 2 seconds (32,000 samples = 200 mel frames) of trailing silence,
+    // the final iteration always has >= 200 frames (n_audio_tokens >= 100 > 7),
+    // guaranteeing stock whisper.cpp's assertion is satisfied with zero changes to
+    // upstream whisper.cpp C++ code.
+    int32_t tail_padding_samples = 32000;
+    int32_t padded_n_samples = n_samples + tail_padding_samples;
+    float* padded_samples = static_cast<float*>(malloc(padded_n_samples * sizeof(float)));
+    if (padded_samples != nullptr) {
+      memcpy(padded_samples, samples, n_samples * sizeof(float));
+      memset(padded_samples + n_samples, 0, tail_padding_samples * sizeof(float));
+      free(samples);
+      samples = padded_samples;
+      n_samples = padded_n_samples;
     }
 
     // Transcribe the decoded PCM using the existing implementation.
