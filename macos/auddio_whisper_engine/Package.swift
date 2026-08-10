@@ -25,8 +25,8 @@ let package = Package(
         ),
         .binaryTarget(
             name: "auddio_whisper",
-            url: "https://github.com/ketanchoyal/auddio_whisper_engine/releases/download/whisper-v0.0.10/libauddio_whisper_macos.xcframework.zip",
-            checksum: "9593ab584e20482dcb74d0bfc5c86d553c69ba2c9c4476c0667266ef86b88df5"
+            url: "https://github.com/ketanchoyal/auddio_whisper_engine/releases/download/whisper-v0.0.11/libauddio_whisper_macos.xcframework.zip",
+            checksum: "425a3c8ef0f47b3b5f01e93a4111723117c01d250bef1f5bb9e046d6331509ec"
         )
     ]
 )

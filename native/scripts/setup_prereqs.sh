@@ -22,7 +22,7 @@ awe_setup_prereqs() {
     return 1
   fi
 
-  for tool in ${cli_tools}; do
+  for tool in cmake ninja gh zip; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
       if ! command -v brew >/dev/null 2>&1; then
         echo "ERROR: ${tool} missing and Homebrew not installed." >&2
