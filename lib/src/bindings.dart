@@ -5,9 +5,9 @@ typedef AweInitC = Pointer<Void> Function(Pointer<Char>, Bool, Int32);
 typedef AweInitDart = Pointer<Void> Function(Pointer<Char>, bool, int);
 
 typedef AweTranscribeFileWindowC = Int32 Function(
-    Pointer<Void>, Pointer<Char>, Int64, Int64, Int32);
+    Pointer<Void>, Pointer<Char>, Int64, Int64, Int32, Pointer<Char>, Pointer<Char>);
 typedef AweTranscribeFileWindowDart = int Function(
-    Pointer<Void>, Pointer<Char>, int, int, int);
+    Pointer<Void>, Pointer<Char>, int, int, int, Pointer<Char>, Pointer<Char>);
 
 typedef AweDecodeAudioWindowC = Int32 Function(
     Pointer<Char>, Int64, Int64, Pointer<Pointer<Float>>, Pointer<Int32>, Pointer<Pointer<Char>>);

@@ -114,7 +114,9 @@ awe_context* awe_init(const char* model_path, bool use_gpu, int32_t dtw_aheads_p
 }
 
 static int32_t awe_transcribe_impl(awe_context* ctx, const float* samples,
-                                   int32_t n_samples, int32_t n_threads) {
+                                   int32_t n_samples, int32_t n_threads,
+                                   const char* initial_prompt,
+                                   const char* language) {
   ctx->segments.clear();
   ctx->last_error.clear();
 
@@ -127,6 +129,31 @@ static int32_t awe_transcribe_impl(awe_context* ctx, const float* samples,
   params.print_realtime = false;
   params.print_timestamps = false;
   params.no_timestamps = false;
+
+  // 1. Initial Prompt / Context Injection
+  if (initial_prompt != nullptr && initial_prompt[0] != '\0') {
+    params.initial_prompt = initial_prompt;
+  }
+
+  // 2. Language selection: pass specified language (e.g. "en", "es", "fr", "de"),
+  // or "auto" to detect, defaulting to "en".
+  if (language != nullptr && language[0] != '\0') {
+    if (std::strcmp(language, "auto") == 0) {
+      params.language = nullptr;
+      params.detect_language = true;
+    } else {
+      params.language = language;
+      params.detect_language = false;
+    }
+  } else {
+    params.language = "en";
+    params.detect_language = false;
+  }
+
+  // 3. Decoding optimizations
+  params.suppress_blank = true;
+  params.suppress_nst = false; // Retain [MUSIC], (applause), etc.
+  params.no_speech_thold = 0.6f;
 
   const int rc = whisper_full(ctx->ctx, params, samples, n_samples);
   if (rc != 0) {
@@ -204,7 +231,9 @@ static int32_t awe_transcribe_impl(awe_context* ctx, const float* samples,
 
 int32_t awe_transcribe_file_window(awe_context* ctx, const char* file_path,
                                    int64_t start_ms, int64_t duration_ms,
-                                   int32_t n_threads) {
+                                   int32_t n_threads,
+                                   const char* initial_prompt,
+                                   const char* language) {
   if (ctx == nullptr || ctx->ctx == nullptr || file_path == nullptr) return -1;
   try {
     // Decode the audio window using the platform-native decoder.
@@ -245,7 +274,7 @@ int32_t awe_transcribe_file_window(awe_context* ctx, const char* file_path,
     }
 
     // Transcribe the decoded PCM using the existing implementation.
-    int32_t result = awe_transcribe_impl(ctx, samples, n_samples, n_threads);
+    int32_t result = awe_transcribe_impl(ctx, samples, n_samples, n_threads, initial_prompt, language);
     free(samples);
     return result;
   } catch (const std::exception& e) {

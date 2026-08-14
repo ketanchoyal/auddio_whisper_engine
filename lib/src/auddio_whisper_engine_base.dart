@@ -44,11 +44,20 @@ class AuddioWhisperEngine {
     required int startMs,
     required int durationMs,
     int nThreads = 4,
+    String? initialPrompt,
+    String? language,
   }) {
     if (_ctx == nullptr) {
       throw const WhisperEngineException('engine disposed');
     }
     final pathPtr = filePath.toNativeUtf8();
+    final promptPtr = (initialPrompt != null && initialPrompt.trim().isNotEmpty)
+        ? initialPrompt.toNativeUtf8()
+        : null;
+    final langPtr = (language != null && language.trim().isNotEmpty)
+        ? language.toNativeUtf8()
+        : null;
+
     try {
       final rc = _bindings.transcribeFileWindow(
         _ctx,
@@ -56,6 +65,8 @@ class AuddioWhisperEngine {
         startMs,
         durationMs,
         nThreads,
+        promptPtr != null ? promptPtr.cast<Char>() : nullptr,
+        langPtr != null ? langPtr.cast<Char>() : nullptr,
       );
       if (rc != 0) {
         throw WhisperEngineException(
@@ -65,6 +76,8 @@ class AuddioWhisperEngine {
       return _readSegments();
     } finally {
       calloc.free(pathPtr);
+      if (promptPtr != null) calloc.free(promptPtr);
+      if (langPtr != null) calloc.free(langPtr);
     }
   }
 

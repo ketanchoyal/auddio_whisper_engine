@@ -50,10 +50,12 @@ AWE_EXPORT awe_context* awe_init(const char* model_path, bool use_gpu, int32_t d
 // whisper transcription on the decoded PCM — all in one call. This bypasses
 // Dart-side FFmpeg process spawning and temporary WAV file I/O entirely.
 //
-//   file_path   : absolute path to the audiobook file (.mp3, .m4a, .m4b, etc.)
-//   start_ms    : start offset in the file (milliseconds)
-//   duration_ms : duration of the window to decode and transcribe (milliseconds)
-//   n_threads   : number of CPU threads for the whisper decoder
+//   file_path      : absolute path to the audiobook file (.mp3, .m4a, .m4b, etc.)
+//   start_ms       : start offset in the file (milliseconds)
+//   duration_ms    : duration of the window to decode and transcribe (milliseconds)
+//   n_threads      : number of CPU threads for the whisper decoder
+//   initial_prompt : optional context prompt string (or NULL)
+//   language       : optional language code (e.g. "en", "es", "auto", or NULL for default "en")
 //
 // Returns 0 on success, non-zero on failure (inspect awe_last_error).
 // Segment/word accessors work identically after this call.
@@ -61,7 +63,9 @@ AWE_EXPORT int32_t awe_transcribe_file_window(awe_context* ctx,
                                               const char* file_path,
                                               int64_t start_ms,
                                               int64_t duration_ms,
-                                              int32_t n_threads);
+                                              int32_t n_threads,
+                                              const char* initial_prompt,
+                                              const char* language);
 
 // Decodes a time window from an audio file directly to a float32 PCM buffer in memory.
 //   file_path     : absolute path to the audiobook file (.mp3, .m4a, .m4b, etc.)
