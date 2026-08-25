@@ -4,6 +4,7 @@
 build/
 .build/
 coverage/
+.swiftpm/
 /pubspec.lock
 
 # IDE / OS

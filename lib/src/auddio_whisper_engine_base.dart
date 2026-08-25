@@ -33,6 +33,21 @@ class AuddioWhisperEngine {
 
   bool get isDisposed => _ctx == nullptr;
 
+  /// Sets the path to the Silero VAD model (.onnx). When set, subsequent
+  /// transcribe calls enable Voice Activity Detection — skipping silence
+  /// for faster transcription and mapping token timestamps back to the
+  /// original audio timeline. Pass null to disable VAD.
+  void setVadModel(String? vadModelPath) {
+    if (_ctx == nullptr) return;
+    if (vadModelPath != null && vadModelPath.isNotEmpty) {
+      final ptr = vadModelPath.toNativeUtf8();
+      _bindings.setVadModel(_ctx, ptr.cast<Char>());
+      calloc.free(ptr);
+    } else {
+      _bindings.setVadModel(_ctx, nullptr);
+    }
+  }
+
   /// Decodes a time window from an audio file and transcribes it, all in C++.
   ///
   /// This bypasses Dart-side FFmpeg process spawning and temporary WAV file I/O
@@ -76,6 +91,62 @@ class AuddioWhisperEngine {
       return _readSegments();
     } finally {
       calloc.free(pathPtr);
+      if (promptPtr != null) calloc.free(promptPtr);
+      if (langPtr != null) calloc.free(langPtr);
+    }
+  }
+
+  /// Transcribes raw PCM samples directly (no file needed).
+  ///
+  /// Used for live transcription of streaming audio. The native layer
+  /// downmixes to mono, resamples to 16 kHz, appends trailing silence, and
+  /// runs whisper — all in C++.
+  ///
+  /// [samples] are interleaved float32 values in [-1.0, +1.0] at
+  /// [sampleRate] Hz with [channels] channels (e.g. from the mpv player's
+  /// PCM stream).
+  List<WhisperSegment> transcribeSamples({
+    required Float32List samples,
+    required int sampleRate,
+    required int channels,
+    int nThreads = 4,
+    String? initialPrompt,
+    String? language,
+  }) {
+    if (_ctx == nullptr) {
+      throw const WhisperEngineException('engine disposed');
+    }
+    final promptPtr = (initialPrompt != null && initialPrompt.trim().isNotEmpty)
+        ? initialPrompt.toNativeUtf8()
+        : null;
+    final langPtr = (language != null && language.trim().isNotEmpty)
+        ? language.toNativeUtf8()
+        : null;
+
+    // Copy the Float32List into native memory (the GC could move the Dart
+    // typed-data backing store if we held a Pointer to it directly).
+    final samplesPtr = calloc<Float>(samples.length);
+    samplesPtr.asTypedList(samples.length).setAll(0, samples);
+
+    try {
+      final rc = _bindings.transcribeSamples(
+        _ctx,
+        samplesPtr,
+        samples.length,
+        sampleRate,
+        channels,
+        nThreads,
+        promptPtr != null ? promptPtr.cast<Char>() : nullptr,
+        langPtr != null ? langPtr.cast<Char>() : nullptr,
+      );
+      if (rc != 0) {
+        throw WhisperEngineException(
+          _readError() ?? 'awe_transcribe_samples rc=$rc',
+        );
+      }
+      return _readSegments();
+    } finally {
+      calloc.free(samplesPtr);
       if (promptPtr != null) calloc.free(promptPtr);
       if (langPtr != null) calloc.free(langPtr);
     }

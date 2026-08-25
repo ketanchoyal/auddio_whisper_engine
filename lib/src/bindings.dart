@@ -14,6 +14,14 @@ typedef AweDecodeAudioWindowC = Int32 Function(
 typedef AweDecodeAudioWindowDart = int Function(
     Pointer<Char>, int, int, Pointer<Pointer<Float>>, Pointer<Int32>, Pointer<Pointer<Char>>);
 
+typedef AweTranscribeSamplesC = Int32 Function(
+    Pointer<Void>, Pointer<Float>, Int32, Int32, Int32, Int32, Pointer<Char>, Pointer<Char>);
+typedef AweTranscribeSamplesDart = int Function(
+    Pointer<Void>, Pointer<Float>, int, int, int, int, Pointer<Char>, Pointer<Char>);
+
+typedef AweSetVadModelC = Void Function(Pointer<Void>, Pointer<Char>);
+typedef AweSetVadModelDart = void Function(Pointer<Void>, Pointer<Char>);
+
 typedef AweSegCountC = Int32 Function(Pointer<Void>);
 typedef AweSegCountDart = int Function(Pointer<Void>);
 
@@ -47,6 +55,12 @@ class WhisperBindings {
         decodeAudioWindow = lib.lookupFunction<
             AweDecodeAudioWindowC,
             AweDecodeAudioWindowDart>('awe_decode_audio_window_ffi'),
+        transcribeSamples = lib.lookupFunction<
+            AweTranscribeSamplesC,
+            AweTranscribeSamplesDart>('awe_transcribe_samples'),
+        setVadModel = lib.lookupFunction<
+            AweSetVadModelC,
+            AweSetVadModelDart>('awe_set_vad_model'),
         segmentCount = lib
             .lookupFunction<AweSegCountC, AweSegCountDart>('awe_segment_count'),
         segmentText = lib
@@ -70,6 +84,8 @@ class WhisperBindings {
   final AweInitDart init;
   final AweTranscribeFileWindowDart transcribeFileWindow;
   final AweDecodeAudioWindowDart decodeAudioWindow;
+  final AweTranscribeSamplesDart transcribeSamples;
+  final AweSetVadModelDart setVadModel;
   final AweSegCountDart segmentCount;
   final AweSegTextDart segmentText;
   final AweSegTimeDart segmentT0Ms;

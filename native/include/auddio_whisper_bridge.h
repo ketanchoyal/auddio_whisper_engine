@@ -84,6 +84,38 @@ AWE_EXPORT int32_t awe_decode_audio_window_ffi(const char* file_path,
                                                int32_t* out_n_samples,
                                                char** out_error);
 
+// Sets the path to the Silero VAD model (.onnx) for this context. When set,
+// subsequent awe_transcribe_file_window / awe_transcribe_samples calls will
+// enable VAD (Voice Activity Detection) in whisper_full_params — skipping
+// silence for faster transcription and mapping token timestamps back to the
+// original audio timeline. Pass NULL to disable VAD.
+AWE_EXPORT void awe_set_vad_model(awe_context* ctx, const char* vad_model_path);
+
+// ---- Live PCM transcription -----------------------------------------------
+// Transcribes raw PCM samples (e.g. from a live audio stream/player) without
+// needing a file on disk. The function downmixes to mono, resamples to 16 kHz,
+// appends trailing silence, and runs whisper — all in one call.
+//
+//   ctx           : engine handle from awe_init()
+//   samples       : interleaved float32 samples, range [-1.0, +1.0]
+//   n_samples     : total number of float values in `samples`
+//   sample_rate   : sample rate of the input (e.g. 44100, 48000)
+//   channels      : channel count (1=mono, 2=stereo, 6=5.1)
+//   n_threads     : number of CPU threads for the whisper decoder
+//   initial_prompt : optional context prompt string (or NULL)
+//   language       : optional language code (e.g. "en", "es", "auto", or NULL)
+//
+// Returns 0 on success, non-zero on failure (inspect awe_last_error).
+// Segment/word accessors work identically after this call.
+AWE_EXPORT int32_t awe_transcribe_samples(awe_context* ctx,
+                                          const float* samples,
+                                          int32_t n_samples,
+                                          int32_t sample_rate,
+                                          int32_t channels,
+                                          int32_t n_threads,
+                                          const char* initial_prompt,
+                                          const char* language);
+
 // ---- Segment accessors (valid after a successful transcription) -----------
 AWE_EXPORT int32_t awe_segment_count(awe_context* ctx);
 AWE_EXPORT const char* awe_segment_text(awe_context* ctx, int32_t i_segment);

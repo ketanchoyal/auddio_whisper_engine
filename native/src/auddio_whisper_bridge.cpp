@@ -32,6 +32,9 @@ struct awe_context {
   whisper_context* ctx = nullptr;
   std::vector<Segment> segments;
   std::string last_error;
+  // Optional VAD model path — set by awe_set_vad_model. When non-empty,
+  // awe_transcribe_impl enables VAD in whisper_full_params.
+  std::string vad_model_path;
 };
 
 awe_context* awe_init(const char* model_path, bool use_gpu, int32_t dtw_aheads_preset) {
@@ -40,6 +43,12 @@ awe_context* awe_init(const char* model_path, bool use_gpu, int32_t dtw_aheads_p
   try {
     if (model_path == nullptr) return nullptr;
     auto* wrapper = new awe_context();
+
+    // Suppress all whisper.cpp/ggml stderr logging. Our bridge already sets
+    // print_progress/print_realtime/print_timestamps = false on every call,
+    // but this also catches internal ggml warnings (Metal init, BLAS fallback,
+    // etc.) that would otherwise spam the app's console.
+    whisper_log_set(nullptr, nullptr);
 
     whisper_context_params cparams = whisper_context_default_params();
     cparams.use_gpu = use_gpu;
@@ -113,10 +122,25 @@ awe_context* awe_init(const char* model_path, bool use_gpu, int32_t dtw_aheads_p
   }
 }
 
+// Sets the path to the Silero VAD model (.onnx) for this context. When set,
+// subsequent awe_transcribe_file_window / awe_transcribe_samples calls will
+// enable VAD in whisper_full_params, skipping silence for faster transcription
+// and mapping token timestamps back to the original audio timeline.
+// Pass nullptr to disable VAD.
+void awe_set_vad_model(awe_context* ctx, const char* vad_model_path) {
+  if (ctx == nullptr) return;
+  if (vad_model_path != nullptr && vad_model_path[0] != '\0') {
+    ctx->vad_model_path = vad_model_path;
+  } else {
+    ctx->vad_model_path.clear();
+  }
+}
+
 static int32_t awe_transcribe_impl(awe_context* ctx, const float* samples,
                                    int32_t n_samples, int32_t n_threads,
                                    const char* initial_prompt,
-                                   const char* language) {
+                                   const char* language,
+                                   bool use_vad) {
   ctx->segments.clear();
   ctx->last_error.clear();
 
@@ -133,6 +157,11 @@ static int32_t awe_transcribe_impl(awe_context* ctx, const float* samples,
   // 1. Initial Prompt / Context Injection
   if (initial_prompt != nullptr && initial_prompt[0] != '\0') {
     params.initial_prompt = initial_prompt;
+    // Always prepend the initial_prompt to every decode window so the static
+    // metadata prompt (book title, author, key terms) is present in every
+    // chunk — not just window 0. Without this, later windows lose the
+    // proper-noun conditioning from the metadata.
+    params.carry_initial_prompt = true;
   }
 
   // 2. Language selection: pass specified language (e.g. "en", "es", "fr", "de"),
@@ -155,6 +184,22 @@ static int32_t awe_transcribe_impl(awe_context* ctx, const float* samples,
   params.suppress_nst = false; // Retain [MUSIC], (applause), etc.
   params.no_speech_thold = 0.6f;
 
+  // 4. VAD (Voice Activity Detection) — skip silence segments for faster
+  // transcription. When enabled, whisper_full removes silent audio before
+  // decoding, and token timestamps are mapped back to the original timeline.
+  if (use_vad && !ctx->vad_model_path.empty()) {
+    params.vad = true;
+    params.vad_model_path = ctx->vad_model_path.c_str();
+    params.vad_params = whisper_vad_default_params();
+    // Audiobook-friendly defaults: tolerate short pauses between sentences,
+    // but cut long inter-paragraph silences.
+    params.vad_params.threshold = 0.5f;
+    params.vad_params.min_speech_duration_ms = 250;
+    params.vad_params.min_silence_duration_ms = 500;
+    params.vad_params.max_speech_duration_s = 30.0f;
+    params.vad_params.speech_pad_ms = 200;
+  }
+
   const int rc = whisper_full(ctx->ctx, params, samples, n_samples);
   if (rc != 0) {
     ctx->last_error = "whisper_full failed with code " + std::to_string(rc);
@@ -165,6 +210,15 @@ static int32_t awe_transcribe_impl(awe_context* ctx, const float* samples,
   ctx->segments.reserve(n_segments);
 
   for (int s = 0; s < n_segments; ++s) {
+    // Skip segments classified as non-speech (music, silence, noise). The
+    // no_speech_thold is a global filter inside whisper, but this per-segment
+    // probability lets us apply a stricter post-filter (0.8) to catch
+    // borderline cases that pass the internal threshold but are clearly
+    // not speech (e.g. instrumental interludes in audiobooks).
+    const float no_speech_prob =
+        whisper_full_get_segment_no_speech_prob(ctx->ctx, s);
+    if (no_speech_prob > 0.8f) continue;
+
     Segment seg;
     const char* seg_text = whisper_full_get_segment_text(ctx->ctx, s);
     seg.text = seg_text != nullptr ? seg_text : "";
@@ -193,12 +247,23 @@ static int32_t awe_transcribe_impl(awe_context* ctx, const float* samples,
       std::string piece = raw;
       if (piece.empty()) continue;
 
-      const whisper_token_data data =
-          whisper_full_get_token_data(ctx->ctx, s, t);
-      // Prefer DTW-aligned time; fall back to the heuristic token time.
-      const int64_t tok_t0 =
-          cs_to_ms(data.t_dtw >= 0 ? data.t_dtw : data.t0);
-      const int64_t tok_t1 = cs_to_ms(data.t1);
+      // Word-level timestamps:
+      // - Without VAD: use DTW-aligned time (data.t_dtw) — most accurate.
+      // - With VAD: use whisper_full_get_token_t0/t1 — these map back to the
+      //   ORIGINAL audio timeline. data.t_dtw/t0/t1 stay in VAD-processed time
+      //   (drifted by cumulative removed silence), which would break word
+      //   highlighting by seconds.
+      int64_t tok_t0;
+      int64_t tok_t1;
+      if (use_vad && !ctx->vad_model_path.empty()) {
+        tok_t0 = cs_to_ms(whisper_full_get_token_t0(ctx->ctx, s, t));
+        tok_t1 = cs_to_ms(whisper_full_get_token_t1(ctx->ctx, s, t));
+      } else {
+        const whisper_token_data data =
+            whisper_full_get_token_data(ctx->ctx, s, t);
+        tok_t0 = cs_to_ms(data.t_dtw >= 0 ? data.t_dtw : data.t0);
+        tok_t1 = cs_to_ms(data.t1);
+      }
 
       // A leading space (whisper BPE word-boundary marker) starts a new word;
       // continuation pieces append to the current word.
@@ -274,7 +339,10 @@ int32_t awe_transcribe_file_window(awe_context* ctx, const char* file_path,
     }
 
     // Transcribe the decoded PCM using the existing implementation.
-    int32_t result = awe_transcribe_impl(ctx, samples, n_samples, n_threads, initial_prompt, language);
+    // File-based chapter transcription: VAD enabled if a VAD model was loaded.
+    int32_t result = awe_transcribe_impl(ctx, samples, n_samples, n_threads,
+                                         initial_prompt, language,
+                                         /*use_vad=*/!ctx->vad_model_path.empty());
     free(samples);
     return result;
   } catch (const std::exception& e) {
@@ -284,6 +352,95 @@ int32_t awe_transcribe_file_window(awe_context* ctx, const char* file_path,
   } catch (...) {
     ctx->segments.clear();
     ctx->last_error = "unknown native exception in file window transcription";
+    return -3;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Live PCM transcription — accepts raw float32 samples at any sample rate /
+// channel count, downmixes to mono, resamples to 16 kHz, and runs whisper.
+// Used for live transcription of streaming audio (PCM from the mpv player)
+// when no local file is available to decode.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Linear resampler: maps src_rate → dst_rate by linear interpolation.
+// Works for any ratio (e.g. 44100→16000, 48000→16000). Quality is sufficient
+// for speech recognition — whisper's mel filterbank is robust to minor
+// interpolation artifacts.
+std::vector<float> resample_linear(const float* src, int32_t n_src,
+                                    int32_t src_rate, int32_t dst_rate) {
+  if (src_rate == dst_rate || n_src <= 0) {
+    return std::vector<float>(src, src + n_src);
+  }
+  const double ratio = static_cast<double>(dst_rate) / src_rate;
+  const int32_t n_dst = static_cast<int32_t>(n_src * ratio);
+  std::vector<float> dst(n_dst);
+  for (int32_t i = 0; i < n_dst; ++i) {
+    const double src_pos = static_cast<double>(i) / ratio;
+    const int32_t idx0 = static_cast<int32_t>(src_pos);
+    const int32_t idx1 = (idx0 + 1 < n_src) ? idx0 + 1 : idx0;
+    const double frac = src_pos - idx0;
+    dst[i] = static_cast<float>(
+        src[idx0] * (1.0 - frac) + src[idx1] * frac);
+  }
+  return dst;
+}
+
+// Downmix interleaved multi-channel float32 to mono by averaging all channels.
+std::vector<float> downmix_to_mono(const float* src, int32_t n_total,
+                                   int32_t channels) {
+  if (channels <= 1) return std::vector<float>(src, src + n_total);
+  const int32_t n_frames = n_total / channels;
+  std::vector<float> mono(n_frames);
+  for (int32_t i = 0; i < n_frames; ++i) {
+    double sum = 0.0;
+    for (int32_t c = 0; c < channels; ++c) {
+      sum += src[i * channels + c];
+    }
+    mono[i] = static_cast<float>(sum / channels);
+  }
+  return mono;
+}
+
+} // namespace
+
+int32_t awe_transcribe_samples(awe_context* ctx,
+                               const float* samples,
+                               int32_t n_samples,
+                               int32_t sample_rate,
+                               int32_t channels,
+                               int32_t n_threads,
+                               const char* initial_prompt,
+                               const char* language) {
+  if (ctx == nullptr || ctx->ctx == nullptr || samples == nullptr || n_samples <= 0) {
+    return -1;
+  }
+  try {
+    // 1. Downmix to mono.
+    auto mono = downmix_to_mono(samples, n_samples, channels);
+
+    // 2. Resample to 16 kHz (whisper's required sample rate).
+    auto mono16k = resample_linear(mono.data(), static_cast<int32_t>(mono.size()),
+                                    sample_rate, 16000);
+
+    // 3. Append 2s trailing silence (same median_filter guard as the file path).
+    const int32_t tail_padding = 32000;
+    mono16k.resize(mono16k.size() + tail_padding, 0.0f);
+
+    // 4. Transcribe. VAD enabled if a VAD model was loaded.
+    return awe_transcribe_impl(ctx, mono16k.data(),
+                               static_cast<int32_t>(mono16k.size()),
+                               n_threads, initial_prompt, language,
+                               /*use_vad=*/!ctx->vad_model_path.empty());
+  } catch (const std::exception& e) {
+    ctx->segments.clear();
+    ctx->last_error = std::string("native exception in transcribe_samples: ") + e.what();
+    return -2;
+  } catch (...) {
+    ctx->segments.clear();
+    ctx->last_error = "unknown native exception in transcribe_samples";
     return -3;
   }
 }
