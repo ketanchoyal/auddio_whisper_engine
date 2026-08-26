@@ -61,6 +61,15 @@ typedef AweLastErrorDart = Pointer<Char> Function(Pointer<Void>);
 typedef AweFreeC = Void Function(Pointer<Void>);
 typedef AweFreeDart = void Function(Pointer<Void>);
 
+typedef WhisperPrintSystemInfoC = Pointer<Char> Function();
+typedef WhisperPrintSystemInfoDart = Pointer<Char> Function();
+
+typedef WhisperLogCallbackC = Void Function(Int32, Pointer<Char>, Pointer<Void>);
+typedef WhisperLogSetC = Void Function(
+    Pointer<NativeFunction<WhisperLogCallbackC>>, Pointer<Void>);
+typedef WhisperLogSetDart = void Function(
+    Pointer<NativeFunction<WhisperLogCallbackC>>, Pointer<Void>);
+
 class WhisperBindings {
   WhisperBindings(DynamicLibrary lib)
       : init = lib.lookupFunction<AweInitC, AweInitDart>('awe_init'),
@@ -70,12 +79,14 @@ class WhisperBindings {
         decodeAudioWindow = lib.lookupFunction<
             AweDecodeAudioWindowC,
             AweDecodeAudioWindowDart>('awe_decode_audio_window_ffi'),
-        transcribeSamples = lib.lookupFunction<
-            AweTranscribeSamplesC,
-            AweTranscribeSamplesDart>('awe_transcribe_samples'),
-        setVadModel = lib.lookupFunction<
-            AweSetVadModelC,
-            AweSetVadModelDart>('awe_set_vad_model'),
+        transcribeSamples = lib.providesSymbol('awe_transcribe_samples')
+            ? lib.lookupFunction<AweTranscribeSamplesC, AweTranscribeSamplesDart>(
+                'awe_transcribe_samples')
+            : null,
+        setVadModel = lib.providesSymbol('awe_set_vad_model')
+            ? lib.lookupFunction<AweSetVadModelC, AweSetVadModelDart>(
+                'awe_set_vad_model')
+            : null,
         segmentCount = lib
             .lookupFunction<AweSegCountC, AweSegCountDart>('awe_segment_count'),
         segmentText = lib
@@ -107,6 +118,11 @@ class WhisperBindings {
         fullGetTokenT1 = lib.lookupFunction<
             WhisperFullGetTokenT1C,
             WhisperFullGetTokenT1Dart>('whisper_full_get_token_t1'),
+        printSystemInfo = lib.lookupFunction<
+            WhisperPrintSystemInfoC,
+            WhisperPrintSystemInfoDart>('whisper_print_system_info'),
+        logSet = lib.lookupFunction<WhisperLogSetC, WhisperLogSetDart>(
+            'whisper_log_set'),
         lastError = lib
             .lookupFunction<AweLastErrorC, AweLastErrorDart>('awe_last_error'),
         free = lib.lookupFunction<AweFreeC, AweFreeDart>('awe_free');
@@ -114,8 +130,8 @@ class WhisperBindings {
   final AweInitDart init;
   final AweTranscribeFileWindowDart transcribeFileWindow;
   final AweDecodeAudioWindowDart decodeAudioWindow;
-  final AweTranscribeSamplesDart transcribeSamples;
-  final AweSetVadModelDart setVadModel;
+  final AweTranscribeSamplesDart? transcribeSamples;
+  final AweSetVadModelDart? setVadModel;
   final AweSegCountDart segmentCount;
   final AweSegTextDart segmentText;
   final AweSegTimeDart segmentT0Ms;
@@ -129,6 +145,8 @@ class WhisperBindings {
   final WhisperFullGetTokenTextDart fullGetTokenText;
   final WhisperFullGetTokenT0Dart fullGetTokenT0;
   final WhisperFullGetTokenT1Dart fullGetTokenT1;
+  final WhisperPrintSystemInfoDart printSystemInfo;
+  final WhisperLogSetDart logSet;
   final AweLastErrorDart lastError;
   final AweFreeDart free;
 }

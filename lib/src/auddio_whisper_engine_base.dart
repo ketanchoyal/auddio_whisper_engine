@@ -6,11 +6,27 @@ import 'package:ffi/ffi.dart';
 import 'bindings.dart';
 import 'whisper_result.dart';
 
+bool _coreMlLoadedInLastInit = false;
+
+void _nativeLogCapture(int level, Pointer<Char> text, Pointer<Void> userData) {
+  if (text != nullptr) {
+    try {
+      final msg = text.cast<Utf8>().toDartString();
+      if (msg.contains('Core ML model loaded')) {
+        _coreMlLoadedInLastInit = true;
+      } else if (msg.contains('failed to load Core ML model')) {
+        _coreMlLoadedInLastInit = false;
+      }
+    } catch (_) {}
+  }
+}
+
 class AuddioWhisperEngine {
-  AuddioWhisperEngine._(this._bindings, this._ctx);
+  AuddioWhisperEngine._(this._bindings, this._ctx, {this.isCoreMlActive = false});
 
   final WhisperBindings _bindings;
   Pointer<Void> _ctx;
+  final bool isCoreMlActive;
 
   static AuddioWhisperEngine open({
     required String modelPath,
@@ -19,13 +35,21 @@ class AuddioWhisperEngine {
     DynamicLibrary? customLibrary,
   }) {
     final bindings = WhisperBindings(customLibrary ?? openWhisperLibrary());
+    _coreMlLoadedInLastInit = false;
+    try {
+      final callbackPtr =
+          Pointer.fromFunction<WhisperLogCallbackC>(_nativeLogCapture);
+      bindings.logSet(callbackPtr, nullptr);
+    } catch (_) {}
+
     final pathPtr = modelPath.toNativeUtf8();
     try {
       final ctx = bindings.init(pathPtr.cast<Char>(), useGpu, dtwAheadsPreset);
       if (ctx == nullptr) {
         throw const WhisperEngineException('awe_init returned null');
       }
-      return AuddioWhisperEngine._(bindings, ctx);
+      final isCoreMl = _coreMlLoadedInLastInit;
+      return AuddioWhisperEngine._(bindings, ctx, isCoreMlActive: isCoreMl);
     } finally {
       calloc.free(pathPtr);
     }
@@ -39,12 +63,14 @@ class AuddioWhisperEngine {
   /// original audio timeline. Pass null to disable VAD.
   void setVadModel(String? vadModelPath) {
     if (_ctx == nullptr) return;
+    final fn = _bindings.setVadModel;
+    if (fn == null) return;
     if (vadModelPath != null && vadModelPath.isNotEmpty) {
       final ptr = vadModelPath.toNativeUtf8();
-      _bindings.setVadModel(_ctx, ptr.cast<Char>());
+      fn(_ctx, ptr.cast<Char>());
       calloc.free(ptr);
     } else {
-      _bindings.setVadModel(_ctx, nullptr);
+      fn(_ctx, nullptr);
     }
   }
 
@@ -129,7 +155,13 @@ class AuddioWhisperEngine {
     samplesPtr.asTypedList(samples.length).setAll(0, samples);
 
     try {
-      final rc = _bindings.transcribeSamples(
+      final fn = _bindings.transcribeSamples;
+      if (fn == null) {
+        throw const WhisperEngineException(
+          'awe_transcribe_samples not supported in this build',
+        );
+      }
+      final rc = fn(
         _ctx,
         samplesPtr,
         samples.length,
