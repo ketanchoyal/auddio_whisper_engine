@@ -212,16 +212,80 @@ class AuddioWhisperEngine {
   List<WhisperSegment> _readSegments() {
     final segCount = _bindings.segmentCount(_ctx);
     final segments = <WhisperSegment>[];
+    final whisperCtx = _ctx != nullptr ? _ctx.cast<Pointer<Void>>().value : nullptr;
+
     for (var s = 0; s < segCount; s++) {
+      final tokenList = <_TokenData>[];
+      if (whisperCtx != nullptr) {
+        try {
+          final nTokens = _bindings.fullNTokens(whisperCtx, s);
+          for (var t = 0; t < nTokens; t++) {
+            final p = _bindings.fullGetTokenP(whisperCtx, s, t);
+            final text =
+                _readString(_bindings.fullGetTokenText(whisperCtx, s, t));
+            final t0 = _bindings.fullGetTokenT0(whisperCtx, s, t) * 10;
+            final t1 = _bindings.fullGetTokenT1(whisperCtx, s, t) * 10;
+            tokenList.add(_TokenData(text: text, p: p, t0: t0, t1: t1));
+          }
+        } catch (_) {
+          // Fallback if token inspection fails
+        }
+      }
+
       final wordCount = _bindings.wordCount(_ctx, s);
       final words = <WhisperWord>[];
+      var tokenSearchIdx = 0;
+
       for (var w = 0; w < wordCount; w++) {
+        final text = _readString(_bindings.wordText(_ctx, s, w));
+        final startMs = _bindings.wordT0Ms(_ctx, s, w);
+        final endMs = _bindings.wordT1Ms(_ctx, s, w);
+
+        var confidence = 1.0;
+        if (tokenList.isNotEmpty) {
+          // Find tokens overlapping this word's timestamp window or matching text
+          final matchingProbs = <double>[];
+          for (var t = 0; t < tokenList.length; t++) {
+            final tok = tokenList[t];
+            final isSpecial = tok.text.startsWith('[_') ||
+                tok.text.startsWith('<|') ||
+                tok.text.startsWith(' [');
+            if (isSpecial) continue;
+
+            final overlapsTime = (tok.t0 < endMs + 50) && (tok.t1 > startMs - 50);
+            if (overlapsTime && tok.p > 0.0) {
+              matchingProbs.add(tok.p);
+            }
+          }
+
+          // Fallback to sequential text search if timestamp overlap yielded no tokens
+          if (matchingProbs.isEmpty && tokenSearchIdx < tokenList.length) {
+            final cleanWord = text.trim().toLowerCase();
+            for (var t = tokenSearchIdx; t < tokenList.length; t++) {
+              final tok = tokenList[t];
+              final cleanTok = tok.text.trim().toLowerCase();
+              if (cleanTok.isNotEmpty && cleanWord.contains(cleanTok) && tok.p > 0.0) {
+                matchingProbs.add(tok.p);
+                tokenSearchIdx = t + 1;
+                break;
+              }
+            }
+          }
+
+          if (matchingProbs.isNotEmpty) {
+            // Minimum token probability represents the word's weakest sub-word token
+            confidence = matchingProbs.reduce((a, b) => a < b ? a : b).clamp(0.0, 1.0);
+          }
+        }
+
         words.add(WhisperWord(
-          text: _readString(_bindings.wordText(_ctx, s, w)),
-          startMs: _bindings.wordT0Ms(_ctx, s, w),
-          endMs: _bindings.wordT1Ms(_ctx, s, w),
+          text: text,
+          startMs: startMs,
+          endMs: endMs,
+          confidence: confidence,
         ));
       }
+
       segments.add(WhisperSegment(
         text: _readString(_bindings.segmentText(_ctx, s)),
         startMs: _bindings.segmentT0Ms(_ctx, s),
@@ -248,4 +312,18 @@ class AuddioWhisperEngine {
     _bindings.free(_ctx);
     _ctx = nullptr;
   }
+}
+
+class _TokenData {
+  const _TokenData({
+    required this.text,
+    required this.p,
+    required this.t0,
+    required this.t1,
+  });
+
+  final String text;
+  final double p;
+  final int t0;
+  final int t1;
 }

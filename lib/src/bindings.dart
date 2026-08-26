@@ -40,6 +40,21 @@ typedef AweWordTextDart = Pointer<Char> Function(Pointer<Void>, int, int);
 typedef AweWordTimeC = Int64 Function(Pointer<Void>, Int32, Int32);
 typedef AweWordTimeDart = int Function(Pointer<Void>, int, int);
 
+typedef WhisperFullNTokensC = Int32 Function(Pointer<Void>, Int32);
+typedef WhisperFullNTokensDart = int Function(Pointer<Void>, int);
+
+typedef WhisperFullGetTokenPC = Float Function(Pointer<Void>, Int32, Int32);
+typedef WhisperFullGetTokenPDart = double Function(Pointer<Void>, int, int);
+
+typedef WhisperFullGetTokenTextC = Pointer<Char> Function(Pointer<Void>, Int32, Int32);
+typedef WhisperFullGetTokenTextDart = Pointer<Char> Function(Pointer<Void>, int, int);
+
+typedef WhisperFullGetTokenT0C = Int64 Function(Pointer<Void>, Int32, Int32);
+typedef WhisperFullGetTokenT0Dart = int Function(Pointer<Void>, int, int);
+
+typedef WhisperFullGetTokenT1C = Int64 Function(Pointer<Void>, Int32, Int32);
+typedef WhisperFullGetTokenT1Dart = int Function(Pointer<Void>, int, int);
+
 typedef AweLastErrorC = Pointer<Char> Function(Pointer<Void>);
 typedef AweLastErrorDart = Pointer<Char> Function(Pointer<Void>);
 
@@ -77,6 +92,21 @@ class WhisperBindings {
             .lookupFunction<AweWordTimeC, AweWordTimeDart>('awe_word_t0_ms'),
         wordT1Ms = lib
             .lookupFunction<AweWordTimeC, AweWordTimeDart>('awe_word_t1_ms'),
+        fullNTokens = lib.lookupFunction<
+            WhisperFullNTokensC,
+            WhisperFullNTokensDart>('whisper_full_n_tokens'),
+        fullGetTokenP = lib.lookupFunction<
+            WhisperFullGetTokenPC,
+            WhisperFullGetTokenPDart>('whisper_full_get_token_p'),
+        fullGetTokenText = lib.lookupFunction<
+            WhisperFullGetTokenTextC,
+            WhisperFullGetTokenTextDart>('whisper_full_get_token_text'),
+        fullGetTokenT0 = lib.lookupFunction<
+            WhisperFullGetTokenT0C,
+            WhisperFullGetTokenT0Dart>('whisper_full_get_token_t0'),
+        fullGetTokenT1 = lib.lookupFunction<
+            WhisperFullGetTokenT1C,
+            WhisperFullGetTokenT1Dart>('whisper_full_get_token_t1'),
         lastError = lib
             .lookupFunction<AweLastErrorC, AweLastErrorDart>('awe_last_error'),
         free = lib.lookupFunction<AweFreeC, AweFreeDart>('awe_free');
@@ -94,6 +124,11 @@ class WhisperBindings {
   final AweWordTextDart wordText;
   final AweWordTimeDart wordT0Ms;
   final AweWordTimeDart wordT1Ms;
+  final WhisperFullNTokensDart fullNTokens;
+  final WhisperFullGetTokenPDart fullGetTokenP;
+  final WhisperFullGetTokenTextDart fullGetTokenText;
+  final WhisperFullGetTokenT0Dart fullGetTokenT0;
+  final WhisperFullGetTokenT1Dart fullGetTokenT1;
   final AweLastErrorDart lastError;
   final AweFreeDart free;
 }

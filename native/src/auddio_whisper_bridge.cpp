@@ -181,7 +181,10 @@ static int32_t awe_transcribe_impl(awe_context* ctx, const float* samples,
 
   // 3. Decoding optimizations
   params.suppress_blank = true;
-  params.suppress_nst = false; // Retain [MUSIC], (applause), etc.
+  // Suppress non-speech tokens ([HUMMING], [MUSIC], [LAUGHTER], etc.) — these
+  // are whisper's special tags for non-speech sounds. For a read-along
+  // transcript the user wants actual words, not "[HUMMING]".
+  params.suppress_nst = true;
   params.no_speech_thold = 0.6f;
 
   // 4. VAD (Voice Activity Detection) — skip silence segments for faster
@@ -210,15 +213,6 @@ static int32_t awe_transcribe_impl(awe_context* ctx, const float* samples,
   ctx->segments.reserve(n_segments);
 
   for (int s = 0; s < n_segments; ++s) {
-    // Skip segments classified as non-speech (music, silence, noise). The
-    // no_speech_thold is a global filter inside whisper, but this per-segment
-    // probability lets us apply a stricter post-filter (0.8) to catch
-    // borderline cases that pass the internal threshold but are clearly
-    // not speech (e.g. instrumental interludes in audiobooks).
-    const float no_speech_prob =
-        whisper_full_get_segment_no_speech_prob(ctx->ctx, s);
-    if (no_speech_prob > 0.8f) continue;
-
     Segment seg;
     const char* seg_text = whisper_full_get_segment_text(ctx->ctx, s);
     seg.text = seg_text != nullptr ? seg_text : "";

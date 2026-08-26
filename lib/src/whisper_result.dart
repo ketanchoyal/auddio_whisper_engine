@@ -3,11 +3,13 @@ class WhisperWord {
     required this.text,
     required this.startMs,
     required this.endMs,
+    this.confidence = 1.0,
   });
 
   final String text;
   final int startMs;
   final int endMs;
+  final double confidence;
 }
 
 class WhisperSegment {
