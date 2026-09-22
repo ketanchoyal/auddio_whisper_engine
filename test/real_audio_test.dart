@@ -178,4 +178,30 @@ void main() {
       engine.dispose();
     }
   });
+
+  test('transcribe short audio window (<150ms) does not abort or crash median_filter', () async {
+    final libPath = 'native/build/macos/Release/auddio_whisper.framework/auddio_whisper';
+    if (!File(libPath).existsSync()) return;
+
+    final modelPath = await _ensureModel(modelPathEnv);
+    final audioPath = await _ensureAudio(audioPathEnv);
+
+    final engine = AuddioWhisperEngine.open(
+      modelPath: modelPath,
+      useGpu: false,
+      customLibrary: DynamicLibrary.open(libPath),
+    );
+
+    try {
+      // Transcribe a 100ms window (stutter utterance duration)
+      final segments = engine.transcribeFileWindow(
+        filePath: audioPath,
+        startMs: 1000,
+        durationMs: 100,
+      );
+      expect(segments, isA<List<WhisperSegment>>());
+    } finally {
+      engine.dispose();
+    }
+  });
 }

@@ -24,3 +24,13 @@ else
   git -C "${DEST}" checkout --force "${WHISPER_COMMIT}"
   echo "Fetched whisper.cpp @ ${WHISPER_COMMIT}"
 fi
+
+PATCH_FILE="${SCRIPT_DIR}/../patches/whisper_median_filter.patch"
+if [ -f "${PATCH_FILE}" ]; then
+  if git -C "${DEST}" apply --check "${PATCH_FILE}" >/dev/null 2>&1; then
+    echo "Applying whisper_median_filter.patch to whisper.cpp..."
+    git -C "${DEST}" apply "${PATCH_FILE}"
+  else
+    echo "whisper_median_filter.patch already applied or cannot apply cleanly."
+  fi
+fi

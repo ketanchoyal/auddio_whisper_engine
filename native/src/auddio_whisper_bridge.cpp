@@ -157,11 +157,10 @@ static int32_t awe_transcribe_impl(awe_context* ctx, const float* samples,
   // 1. Initial Prompt / Context Injection
   if (initial_prompt != nullptr && initial_prompt[0] != '\0') {
     params.initial_prompt = initial_prompt;
-    // Always prepend the initial_prompt to every decode window so the static
-    // metadata prompt (book title, author, key terms) is present in every
-    // chunk — not just window 0. Without this, later windows lose the
-    // proper-noun conditioning from the metadata.
-    params.carry_initial_prompt = true;
+    // Do not carry initial prompt into subsequent internal sub-windows within
+    // the same window call. Carrying prompt causes hallucination loops and
+    // prompt repetition on short/quiet trailing audio chunks.
+    params.carry_initial_prompt = false;
   }
 
   // 2. Language selection: pass specified language (e.g. "en", "es", "fr", "de"),
