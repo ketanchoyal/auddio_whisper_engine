@@ -30,7 +30,9 @@ if [ -f "${PATCH_FILE}" ]; then
   if git -C "${DEST}" apply --check "${PATCH_FILE}" >/dev/null 2>&1; then
     echo "Applying whisper_median_filter.patch to whisper.cpp..."
     git -C "${DEST}" apply "${PATCH_FILE}"
+  elif git -C "${DEST}" apply --reverse --check "${PATCH_FILE}" >/dev/null 2>&1; then
+    echo "whisper_median_filter.patch is already applied to whisper.cpp."
   else
-    echo "whisper_median_filter.patch already applied or cannot apply cleanly."
+    echo "WARNING: whisper_median_filter.patch could not be applied cleanly." >&2
   fi
 fi
