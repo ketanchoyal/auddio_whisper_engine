@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "auddio_whisper_engine",
     platforms: [
-        .iOS("16.4")
+        .iOS("15.0")
     ],
     products: [
         .library(
