@@ -165,6 +165,10 @@ int awe_decode_audio_window(const char* file_path,
   const int64_t end_us = (start_ms + duration_ms) * 1000;
   bool input_done = false;
   bool output_done = false;
+  // consecutive TRY_AGAIN_LATER drains after input_done — a decoder that has
+  // consumed every fed sample and still emits nothing means its internal
+  // delay buffers were flushed (EOS) and the window is over.
+  int starved_polls = 0;
 
   // Accumulate decoded mono float samples at the source sample rate.
   std::vector<float> decoded_mono;
@@ -188,13 +192,19 @@ int awe_decode_audio_window(const char* file_path,
           input_done = true;
         } else {
           int64_t pts = AMediaExtractor_getSampleTime(extractor);
-          AMediaCodec_queueInputBuffer(codec, buf_idx, 0, sample_size,
-                                       pts, 0);
-          AMediaExtractor_advance(extractor);
-          // Stop feeding once we've passed end_us to avoid decoding the
-          // entire file.
           if (pts > end_us) {
+            // Stop feeding once we've passed end_us to avoid decoding the
+            // entire file. The EOS flag is essential: without it the decoder
+            // never flushes its internal (AAC) delay after the last fed
+            // sample, and the drain loop below waits forever for a buffer
+            // with presentationTimeUs >= end_us that never arrives.
+            AMediaCodec_queueInputBuffer(codec, buf_idx, 0, 0, 0,
+                                         AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM);
             input_done = true;
+          } else {
+            AMediaCodec_queueInputBuffer(codec, buf_idx, 0, sample_size,
+                                         pts, 0);
+            AMediaExtractor_advance(extractor);
           }
         }
       }
@@ -204,6 +214,7 @@ int awe_decode_audio_window(const char* file_path,
     AMediaCodecBufferInfo info;
     ssize_t out_idx = AMediaCodec_dequeueOutputBuffer(codec, &info, 2000);
     if (out_idx >= 0) {
+      starved_polls = 0;
       // Check if this buffer is past our window.
       if (info.presentationTimeUs >= end_us &&
           !(info.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM)) {
@@ -247,6 +258,7 @@ int awe_decode_audio_window(const char* file_path,
         output_done = true;
       }
     } else if (out_idx == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED) {
+      starved_polls = 0;
       // Output format changed; re-read sample rate and channels.
       AMediaFormat* new_fmt = AMediaCodec_getOutputFormat(codec);
       if (new_fmt) {
@@ -256,8 +268,16 @@ int awe_decode_audio_window(const char* file_path,
                               &source_channels);
         AMediaFormat_delete(new_fmt);
       }
+    } else if (out_idx == AMEDIACODEC_INFO_TRY_AGAIN_LATER &&
+               input_done &&
+               ++starved_polls > 100) {
+      // Defensive: 100 consecutive empty drains (200ms) after the last input
+      // buffer was queued means the decoder flushed everything it will ever
+      // emit. Terminate instead of spinning forever if PTS gating above
+      // somehow never fires.
+      output_done = true;
     }
-    // AMEDIACODEC_INFO_TRY_AGAIN_LATER (-1): just loop.
+    // AMEDIACODEC_INFO_TRY_AGAIN_LATER without starvation: just loop.
   }
 
   // 7. Cleanup codec + extractor.
