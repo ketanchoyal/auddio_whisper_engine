@@ -8,6 +8,12 @@ import 'whisper_result.dart';
 
 bool _coreMlLoadedInLastInit = false;
 
+/// True when whisper.cpp selected a GPU backend during the last init
+/// (Metal on Apple platforms). Sniffed from init logs: whisper.cpp logs
+/// "found GPU device" when a GPU (Metal) backend is picked and
+/// "no GPU found" when it falls back to CPU.
+bool _metalLoadedInLastInit = false;
+
 void _nativeLogCapture(int level, Pointer<Char> text, Pointer<Void> userData) {
   if (text != nullptr) {
     try {
@@ -16,17 +22,29 @@ void _nativeLogCapture(int level, Pointer<Char> text, Pointer<Void> userData) {
         _coreMlLoadedInLastInit = true;
       } else if (msg.contains('failed to load Core ML model')) {
         _coreMlLoadedInLastInit = false;
+      } else if (msg.contains('found GPU device')) {
+        _metalLoadedInLastInit = true;
+      } else if (msg.contains('no GPU found')) {
+        _metalLoadedInLastInit = false;
       }
     } catch (_) {}
   }
 }
 
 class AuddioWhisperEngine {
-  AuddioWhisperEngine._(this._bindings, this._ctx, {this.isCoreMlActive = false});
+  AuddioWhisperEngine._(
+    this._bindings,
+    this._ctx, {
+    this.isCoreMlActive = false,
+    this.isMetalActive = false,
+  });
 
   final WhisperBindings _bindings;
   Pointer<Void> _ctx;
   final bool isCoreMlActive;
+
+  /// True when a GPU (Metal on Apple) backend was selected at init.
+  final bool isMetalActive;
 
   static AuddioWhisperEngine open({
     required String modelPath,
@@ -36,6 +54,7 @@ class AuddioWhisperEngine {
   }) {
     final bindings = WhisperBindings(customLibrary ?? openWhisperLibrary());
     _coreMlLoadedInLastInit = false;
+    _metalLoadedInLastInit = false;
     try {
       final callbackPtr =
           Pointer.fromFunction<WhisperLogCallbackC>(_nativeLogCapture);
@@ -49,7 +68,13 @@ class AuddioWhisperEngine {
         throw const WhisperEngineException('awe_init returned null');
       }
       final isCoreMl = _coreMlLoadedInLastInit;
-      return AuddioWhisperEngine._(bindings, ctx, isCoreMlActive: isCoreMl);
+      final isMetal = useGpu && _metalLoadedInLastInit;
+      return AuddioWhisperEngine._(
+        bindings,
+        ctx,
+        isCoreMlActive: isCoreMl,
+        isMetalActive: isMetal,
+      );
     } finally {
       calloc.free(pathPtr);
     }
