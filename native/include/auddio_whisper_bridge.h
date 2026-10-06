@@ -137,6 +137,18 @@ AWE_EXPORT int64_t awe_word_t1_ms(awe_context* ctx,
 // Most recent error message for this context (UTF-8), or NULL if none.
 AWE_EXPORT const char* awe_last_error(awe_context* ctx);
 
+// Diagnostic: which compute backends the engine actually initialized with.
+// The bridge captures whisper.cpp/ggml init logs itself and records:
+//   AWE_BACKEND_COREML — CoreML encoder loaded (Apple Neural Engine path)
+//   AWE_BACKEND_METAL  — a GPU (Metal) backend was selected for decode
+//   AWE_BACKEND_CPU    — no GPU found; decode falls back to CPU
+// Returns 0 when ctx is NULL. Added in v0.0.20; older binaries don't export it
+// (Dart binds it optionally via providesSymbol).
+#define AWE_BACKEND_COREML 0x1u
+#define AWE_BACKEND_METAL 0x2u
+#define AWE_BACKEND_CPU 0x4u
+AWE_EXPORT uint32_t awe_get_backend_flags(awe_context* ctx);
+
 // Releases the whisper_context and all retained results. Safe to call once.
 AWE_EXPORT void awe_free(awe_context* ctx);
 

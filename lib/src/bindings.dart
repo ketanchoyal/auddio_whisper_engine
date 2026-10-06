@@ -58,6 +58,9 @@ typedef WhisperFullGetTokenT1Dart = int Function(Pointer<Void>, int, int);
 typedef AweLastErrorC = Pointer<Char> Function(Pointer<Void>);
 typedef AweLastErrorDart = Pointer<Char> Function(Pointer<Void>);
 
+typedef AweBackendFlagsC = Uint32 Function(Pointer<Void>);
+typedef AweBackendFlagsDart = int Function(Pointer<Void>);
+
 typedef AweFreeC = Void Function(Pointer<Void>);
 typedef AweFreeDart = void Function(Pointer<Void>);
 
@@ -125,6 +128,10 @@ class WhisperBindings {
             'whisper_log_set'),
         lastError = lib
             .lookupFunction<AweLastErrorC, AweLastErrorDart>('awe_last_error'),
+        backendFlags = lib.providesSymbol('awe_get_backend_flags')
+            ? lib.lookupFunction<AweBackendFlagsC, AweBackendFlagsDart>(
+                'awe_get_backend_flags')
+            : null,
         free = lib.lookupFunction<AweFreeC, AweFreeDart>('awe_free');
 
   final AweInitDart init;
@@ -148,6 +155,7 @@ class WhisperBindings {
   final WhisperPrintSystemInfoDart printSystemInfo;
   final WhisperLogSetDart logSet;
   final AweLastErrorDart lastError;
+  final AweBackendFlagsDart? backendFlags;
   final AweFreeDart free;
 }
 

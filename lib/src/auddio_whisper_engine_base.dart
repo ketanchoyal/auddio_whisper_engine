@@ -14,7 +14,14 @@ bool _coreMlLoadedInLastInit = false;
 /// "no GPU found" when it falls back to CPU.
 bool _metalLoadedInLastInit = false;
 
+/// Whether the log capture received ANY line during the last init. Binaries
+/// that swallow logs internally (awe_log_capture, v0.0.20+) never route lines
+/// to this Dart callback — then the sniffed flags are meaningless and callers
+/// must fall back to native backend flags or app-side inference.
+int _logLinesInLastInit = 0;
+
 void _nativeLogCapture(int level, Pointer<Char> text, Pointer<Void> userData) {
+  _logLinesInLastInit += 1;
   if (text != nullptr) {
     try {
       final msg = text.cast<Utf8>().toDartString();
@@ -37,6 +44,7 @@ class AuddioWhisperEngine {
     this._ctx, {
     this.isCoreMlActive = false,
     this.isMetalActive = false,
+    this.logsDelivered = false,
   });
 
   final WhisperBindings _bindings;
@@ -45,6 +53,10 @@ class AuddioWhisperEngine {
 
   /// True when a GPU (Metal on Apple) backend was selected at init.
   final bool isMetalActive;
+
+  /// True when the backend flags above come from a reliable source (native
+  /// awe_get_backend_flags, or init logs that actually reached this isolate).
+  final bool logsDelivered;
 
   static AuddioWhisperEngine open({
     required String modelPath,
@@ -55,6 +67,7 @@ class AuddioWhisperEngine {
     final bindings = WhisperBindings(customLibrary ?? openWhisperLibrary());
     _coreMlLoadedInLastInit = false;
     _metalLoadedInLastInit = false;
+    _logLinesInLastInit = 0;
     try {
       final callbackPtr =
           Pointer.fromFunction<WhisperLogCallbackC>(_nativeLogCapture);
@@ -67,6 +80,23 @@ class AuddioWhisperEngine {
       if (ctx == nullptr) {
         throw const WhisperEngineException('awe_init returned null');
       }
+
+      // Ground truth from the bridge when available (v0.0.20+): it captures
+      // the init logs itself, so the Dart callback never sees them.
+      final flagsFn = bindings.backendFlags;
+      if (flagsFn != null) {
+        final flags = flagsFn(ctx);
+        return AuddioWhisperEngine._(
+          bindings,
+          ctx,
+          isCoreMlActive: (flags & 0x1) != 0,
+          isMetalActive: useGpu && (flags & 0x2) != 0,
+          logsDelivered: true,
+        );
+      }
+
+      // Older binaries: fall back to Dart-side log sniffing — but only trust
+      // it if lines actually arrived (some releases swallow logs internally).
       final isCoreMl = _coreMlLoadedInLastInit;
       final isMetal = useGpu && _metalLoadedInLastInit;
       return AuddioWhisperEngine._(
@@ -74,6 +104,7 @@ class AuddioWhisperEngine {
         ctx,
         isCoreMlActive: isCoreMl,
         isMetalActive: isMetal,
+        logsDelivered: _logLinesInLastInit > 0,
       );
     } finally {
       calloc.free(pathPtr);

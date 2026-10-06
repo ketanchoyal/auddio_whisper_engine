@@ -35,7 +35,33 @@ struct awe_context {
   // Optional VAD model path — set by awe_set_vad_model. When non-empty,
   // awe_transcribe_impl enables VAD in whisper_full_params.
   std::string vad_model_path;
+  // Compute backends actually used, sniffed from init logs (see
+  // awe_get_backend_flags).
+  uint32_t backend_flags = 0;
 };
+
+// Init-log capture: the old whisper_log_set(nullptr) actually RESTORES the
+// default stderr logger (it prints, it doesn't suppress). Installing our own
+// callback instead keeps the console quiet AND records which backends
+// whisper.cpp picked. whisper_log_set routes ggml logs through the same
+// callback, so both whisper and ggml markers are seen here.
+void awe_log_capture(ggml_log_level /*level*/, const char* text, void* user_data) {
+  if (text == nullptr || user_data == nullptr) return;
+  auto* wrapper = static_cast<awe_context*>(user_data);
+  const std::string msg(text);
+  if (msg.find("Core ML model loaded") != std::string::npos) {
+    wrapper->backend_flags |= AWE_BACKEND_COREML;
+  } else if (msg.find("failed to load Core ML model") != std::string::npos) {
+    wrapper->backend_flags &= ~AWE_BACKEND_COREML;
+  }
+  if (msg.find("found GPU device") != std::string::npos) {
+    wrapper->backend_flags |= AWE_BACKEND_METAL;
+    wrapper->backend_flags &= ~AWE_BACKEND_CPU;
+  } else if (msg.find("no GPU found") != std::string::npos) {
+    wrapper->backend_flags &= ~AWE_BACKEND_METAL;
+    wrapper->backend_flags |= AWE_BACKEND_CPU;
+  }
+}
 
 awe_context* awe_init(const char* model_path, bool use_gpu, int32_t dtw_aheads_preset) {
   // No exception may cross this C ABI boundary: an uncaught C++ throw would
@@ -44,11 +70,11 @@ awe_context* awe_init(const char* model_path, bool use_gpu, int32_t dtw_aheads_p
     if (model_path == nullptr) return nullptr;
     auto* wrapper = new awe_context();
 
-    // Suppress all whisper.cpp/ggml stderr logging. Our bridge already sets
-    // print_progress/print_realtime/print_timestamps = false on every call,
-    // but this also catches internal ggml warnings (Metal init, BLAS fallback,
-    // etc.) that would otherwise spam the app's console.
-    whisper_log_set(nullptr, nullptr);
+    // Capture (and swallow) all whisper.cpp/ggml logging: keeps the console
+    // quiet and records which compute backends init actually picked. Note:
+    // whisper_log_set installs GLOBAL state — with multiple live contexts the
+    // last awe_init wins, same limitation the Dart-side sniffer had.
+    whisper_log_set(&awe_log_capture, wrapper);
 
     whisper_context_params cparams = whisper_context_default_params();
     cparams.use_gpu = use_gpu;
@@ -533,8 +559,16 @@ const char* awe_last_error(awe_context* ctx) {
   return ctx->last_error.c_str();
 }
 
+uint32_t awe_get_backend_flags(awe_context* ctx) {
+  if (ctx == nullptr) return 0;
+  return ctx->backend_flags;
+}
+
 void awe_free(awe_context* ctx) {
   if (ctx == nullptr) return;
+  // Detach the global log capture first: it holds this context as user_data,
+  // and any later whisper/ggml log would write through a dangling pointer.
+  whisper_log_set(nullptr, nullptr);
   if (ctx->ctx != nullptr) {
     whisper_free(ctx->ctx);
     ctx->ctx = nullptr;
