@@ -130,6 +130,16 @@ class AuddioWhisperEngine {
     }
   }
 
+  /// Signals the native whisper.cpp context to abort any active transcription
+  /// (both windowed and streaming) immediately.
+  void abort() {
+    if (_ctx == nullptr) return;
+    final fn = _bindings.abort;
+    if (fn != null) {
+      fn(_ctx);
+    }
+  }
+
   /// Decodes a time window from an audio file and transcribes it, all in C++.
   ///
   /// This bypasses Dart-side FFmpeg process spawning and temporary WAV file I/O
@@ -172,6 +182,96 @@ class AuddioWhisperEngine {
       }
       return _readSegments();
     } finally {
+      calloc.free(pathPtr);
+      if (promptPtr != null) calloc.free(promptPtr);
+      if (langPtr != null) calloc.free(langPtr);
+    }
+  }
+
+  /// Streams transcription of long-form audio directly using whisper_full's native
+  /// sliding window. Fires [onSegment] in real-time as each segment finishes.
+  /// [shouldAbort] can be passed to gracefully cancel the stream mid-flight.
+  void transcribeStream({
+    required String filePath,
+    required int startMs,
+    required int durationMs,
+    int nThreads = 4,
+    String? initialPrompt,
+    String? language,
+    required void Function(WhisperSegment segment) onSegment,
+    bool Function()? shouldAbort,
+  }) {
+    if (_ctx == nullptr) {
+      throw const WhisperEngineException('engine disposed');
+    }
+    final fn = _bindings.transcribeStream;
+    if (fn == null) {
+      throw const WhisperEngineException('awe_transcribe_stream not supported in this build');
+    }
+
+    final pathPtr = filePath.toNativeUtf8();
+    final promptPtr = (initialPrompt != null && initialPrompt.trim().isNotEmpty)
+        ? initialPrompt.toNativeUtf8()
+        : null;
+    final langPtr = (language != null && language.trim().isNotEmpty)
+        ? language.toNativeUtf8()
+        : null;
+
+    final segCallback = NativeCallable<AweSegmentCallbackC>.isolateLocal(
+      (int t0, int t1, Pointer<Char> textPtr, int wordCount, Pointer<Void> _) {
+        final text = _readString(textPtr);
+        final currentSegIdx = _bindings.segmentCount(_ctx) - 1;
+        final words = <WhisperWord>[];
+
+        if (currentSegIdx >= 0) {
+          final nWords = _bindings.wordCount(_ctx, currentSegIdx);
+          for (var w = 0; w < nWords; w++) {
+            words.add(WhisperWord(
+              text: _readString(_bindings.wordText(_ctx, currentSegIdx, w)),
+              startMs: _bindings.wordT0Ms(_ctx, currentSegIdx, w),
+              endMs: _bindings.wordT1Ms(_ctx, currentSegIdx, w),
+            ));
+          }
+        }
+
+        onSegment(WhisperSegment(
+          text: text,
+          startMs: t0,
+          endMs: t1,
+          words: words,
+        ));
+      },
+    );
+
+    NativeCallable<AweAbortCallbackC>? abortCallback;
+    if (shouldAbort != null) {
+      abortCallback = NativeCallable<AweAbortCallbackC>.isolateLocal(
+        (Pointer<Void> _) => shouldAbort(),
+        exceptionalReturn: true,
+      );
+    }
+
+    try {
+      final rc = fn(
+        _ctx,
+        pathPtr.cast<Char>(),
+        startMs,
+        durationMs,
+        nThreads,
+        promptPtr != null ? promptPtr.cast<Char>() : nullptr,
+        langPtr != null ? langPtr.cast<Char>() : nullptr,
+        segCallback.nativeFunction,
+        abortCallback != null ? abortCallback.nativeFunction : nullptr,
+        nullptr,
+      );
+      if (rc != 0) {
+        throw WhisperEngineException(
+          _readError() ?? 'awe_transcribe_stream rc=$rc',
+        );
+      }
+    } finally {
+      segCallback.close();
+      abortCallback?.close();
       calloc.free(pathPtr);
       if (promptPtr != null) calloc.free(promptPtr);
       if (langPtr != null) calloc.free(langPtr);

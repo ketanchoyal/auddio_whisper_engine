@@ -9,6 +9,36 @@ typedef AweTranscribeFileWindowC = Int32 Function(
 typedef AweTranscribeFileWindowDart = int Function(
     Pointer<Void>, Pointer<Char>, int, int, int, Pointer<Char>, Pointer<Char>);
 
+typedef AweSegmentCallbackC = Void Function(
+    Int64, Int64, Pointer<Char>, Int32, Pointer<Void>);
+typedef AweAbortCallbackC = Bool Function(Pointer<Void>);
+
+typedef AweAbortC = Void Function(Pointer<Void>);
+typedef AweAbortDart = void Function(Pointer<Void>);
+
+typedef AweTranscribeStreamC = Int32 Function(
+    Pointer<Void>,
+    Pointer<Char>,
+    Int64,
+    Int64,
+    Int32,
+    Pointer<Char>,
+    Pointer<Char>,
+    Pointer<NativeFunction<AweSegmentCallbackC>>,
+    Pointer<NativeFunction<AweAbortCallbackC>>,
+    Pointer<Void>);
+typedef AweTranscribeStreamDart = int Function(
+    Pointer<Void>,
+    Pointer<Char>,
+    int,
+    int,
+    int,
+    Pointer<Char>,
+    Pointer<Char>,
+    Pointer<NativeFunction<AweSegmentCallbackC>>,
+    Pointer<NativeFunction<AweAbortCallbackC>>,
+    Pointer<Void>);
+
 typedef AweDecodeAudioWindowC = Int32 Function(
     Pointer<Char>, Int64, Int64, Pointer<Pointer<Float>>, Pointer<Int32>, Pointer<Pointer<Char>>);
 typedef AweDecodeAudioWindowDart = int Function(
@@ -79,6 +109,10 @@ class WhisperBindings {
         transcribeFileWindow = lib.lookupFunction<
             AweTranscribeFileWindowC,
             AweTranscribeFileWindowDart>('awe_transcribe_file_window'),
+        transcribeStream = lib.providesSymbol('awe_transcribe_stream')
+            ? lib.lookupFunction<AweTranscribeStreamC, AweTranscribeStreamDart>(
+                'awe_transcribe_stream')
+            : null,
         decodeAudioWindow = lib.lookupFunction<
             AweDecodeAudioWindowC,
             AweDecodeAudioWindowDart>('awe_decode_audio_window_ffi'),
@@ -132,10 +166,14 @@ class WhisperBindings {
             ? lib.lookupFunction<AweBackendFlagsC, AweBackendFlagsDart>(
                 'awe_get_backend_flags')
             : null,
+        abort = lib.providesSymbol('awe_abort')
+            ? lib.lookupFunction<AweAbortC, AweAbortDart>('awe_abort')
+            : null,
         free = lib.lookupFunction<AweFreeC, AweFreeDart>('awe_free');
 
   final AweInitDart init;
   final AweTranscribeFileWindowDart transcribeFileWindow;
+  final AweTranscribeStreamDart? transcribeStream;
   final AweDecodeAudioWindowDart decodeAudioWindow;
   final AweTranscribeSamplesDart? transcribeSamples;
   final AweSetVadModelDart? setVadModel;
@@ -156,6 +194,7 @@ class WhisperBindings {
   final WhisperLogSetDart logSet;
   final AweLastErrorDart lastError;
   final AweBackendFlagsDart? backendFlags;
+  final AweAbortDart? abort;
   final AweFreeDart free;
 }
 

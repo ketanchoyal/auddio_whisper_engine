@@ -44,6 +44,16 @@ typedef struct awe_context awe_context;
 // Returns NULL on failure.
 AWE_EXPORT awe_context* awe_init(const char* model_path, bool use_gpu, int32_t dtw_aheads_preset);
 
+// Callback fired each time whisper_full produces a newly finalized segment during
+// streaming transcription. Timestamps are file/chapter absolute (in milliseconds).
+typedef void (*awe_segment_callback)(int64_t t0_ms,
+                                     int64_t t1_ms,
+                                     const char* text,
+                                     int32_t word_count,
+                                     void* user_data);
+
+// Abort callback polled periodically during inference. Return true to abort.
+typedef bool (*awe_abort_callback)(void* user_data);
 
 // Decodes a time window from an audio file directly in C++ (using platform
 // native APIs: ExtAudioFile on Apple, AMediaCodec on Android), then runs
@@ -66,6 +76,23 @@ AWE_EXPORT int32_t awe_transcribe_file_window(awe_context* ctx,
                                               int32_t n_threads,
                                               const char* initial_prompt,
                                               const char* language);
+
+// Streams transcription of long-form audio directly using whisper_full's native
+// sliding window. Fires on_segment as each sentence/segment finishes, and checks
+// should_abort for instantaneous cancellation.
+AWE_EXPORT int32_t awe_transcribe_stream(awe_context* ctx,
+                                         const char* file_path,
+                                         int64_t start_ms,
+                                         int64_t duration_ms,
+                                         int32_t n_threads,
+                                         const char* initial_prompt,
+                                         const char* language,
+                                         awe_segment_callback on_segment,
+                                         awe_abort_callback should_abort,
+                                         void* user_data);
+
+// Signals the context to abort any active transcription (stream or window) immediately.
+AWE_EXPORT void awe_abort(awe_context* ctx);
 
 // Decodes a time window from an audio file directly to a float32 PCM buffer in memory.
 //   file_path     : absolute path to the audiobook file (.mp3, .m4a, .m4b, etc.)

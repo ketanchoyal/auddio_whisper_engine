@@ -1,5 +1,6 @@
 #include "auddio_whisper_bridge.h"
 
+#include <atomic>
 #include <exception>
 #include <string>
 #include <vector>
@@ -38,6 +39,7 @@ struct awe_context {
   // Compute backends actually used, sniffed from init logs (see
   // awe_get_backend_flags).
   uint32_t backend_flags = 0;
+  std::atomic<bool> abort_requested{false};
 };
 
 // Init-log capture: the old whisper_log_set(nullptr) actually RESTORES the
@@ -210,7 +212,10 @@ static int32_t awe_transcribe_impl(awe_context* ctx, const float* samples,
   // are whisper's special tags for non-speech sounds. For a read-along
   // transcript the user wants actual words, not "[HUMMING]".
   params.suppress_nst = true;
-  params.no_speech_thold = 0.6f;
+  // Lowered from 0.6f to 0.4f to prevent dropping quiet audiobook narrator speech or pauses.
+  params.no_speech_thold = 0.4f;
+  params.temperature = 0.0f;
+  params.temperature_inc = 0.2f;
 
   // 4. VAD (Voice Activity Detection) — skip silence segments for faster
   // transcription. When enabled, whisper_full removes silent audio before
@@ -227,6 +232,13 @@ static int32_t awe_transcribe_impl(awe_context* ctx, const float* samples,
     params.vad_params.max_speech_duration_s = 30.0f;
     params.vad_params.speech_pad_ms = 200;
   }
+
+  ctx->abort_requested.store(false, std::memory_order_relaxed);
+  params.abort_callback = [](void* udata) -> bool {
+    auto* ctx = static_cast<awe_context*>(udata);
+    return ctx != nullptr && ctx->abort_requested.load(std::memory_order_relaxed);
+  };
+  params.abort_callback_user_data = ctx;
 
   const int rc = whisper_full(ctx->ctx, params, samples, n_samples);
   if (rc != 0) {
@@ -371,6 +383,196 @@ int32_t awe_transcribe_file_window(awe_context* ctx, const char* file_path,
   } catch (...) {
     ctx->segments.clear();
     ctx->last_error = "unknown native exception in file window transcription";
+    return -3;
+  }
+}
+
+int32_t awe_transcribe_stream(awe_context* ctx,
+                             const char* file_path,
+                             int64_t start_ms,
+                             int64_t duration_ms,
+                             int32_t n_threads,
+                             const char* initial_prompt,
+                             const char* language,
+                             awe_segment_callback on_segment,
+                             awe_abort_callback should_abort,
+                             void* user_data) {
+  if (ctx == nullptr || ctx->ctx == nullptr || file_path == nullptr) return -1;
+  try {
+    ctx->segments.clear();
+    ctx->last_error.clear();
+
+    // 1. Decode continuous audio PCM from start_ms for duration_ms
+    float* samples = nullptr;
+    int32_t n_samples = 0;
+    char* decode_error = nullptr;
+
+    int rc = awe_decode_audio_window(file_path, start_ms, duration_ms,
+                                     &samples, &n_samples, &decode_error);
+    if (rc != 0 || samples == nullptr || n_samples <= 0) {
+      ctx->last_error = decode_error
+          ? std::string("audio decode failed: ") + decode_error
+          : "audio decode failed (unknown error)";
+      if (decode_error) free(decode_error);
+      if (samples) free(samples);
+      return -4;
+    }
+    if (decode_error) free(decode_error);
+
+    // Append 2s of trailing silence so whisper's mel-filter assertions are satisfied
+    int32_t tail_padding_samples = 32000;
+    int32_t padded_n_samples = n_samples + tail_padding_samples;
+    float* padded_samples = static_cast<float*>(malloc(padded_n_samples * sizeof(float)));
+    if (padded_samples != nullptr) {
+      memcpy(padded_samples, samples, n_samples * sizeof(float));
+      memset(padded_samples + n_samples, 0, tail_padding_samples * sizeof(float));
+      free(samples);
+      samples = padded_samples;
+      n_samples = padded_n_samples;
+    }
+
+    // 2. Configure whisper_full with streaming callbacks
+    whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+    params.n_threads = n_threads > 0 ? n_threads : 1;
+    params.token_timestamps = true;
+    params.split_on_word = true;
+    params.print_progress = false;
+    params.print_realtime = false;
+    params.print_timestamps = false;
+    params.no_timestamps = false;
+
+    if (initial_prompt != nullptr && initial_prompt[0] != '\0') {
+      params.initial_prompt = initial_prompt;
+      params.carry_initial_prompt = false;
+    }
+
+    if (language != nullptr && language[0] != '\0') {
+      if (std::strcmp(language, "auto") == 0) {
+        params.language = nullptr;
+        params.detect_language = true;
+      } else {
+        params.language = language;
+        params.detect_language = false;
+      }
+    } else {
+      params.language = "en";
+      params.detect_language = false;
+    }
+
+    params.suppress_blank = true;
+    params.suppress_nst = true;
+    params.no_speech_thold = 0.4f;
+    params.temperature = 0.0f;
+    params.temperature_inc = 0.2f;
+
+    // Structure passed to callbacks
+    struct StreamCallbackState {
+      awe_context* ctx;
+      int64_t base_offset_ms;
+      awe_segment_callback on_segment;
+      awe_abort_callback should_abort;
+      void* user_data;
+      int last_processed_segment = 0;
+    } cb_state{ctx, start_ms, on_segment, should_abort, user_data, 0};
+
+    if (on_segment != nullptr) {
+      params.new_segment_callback = [](whisper_context* wctx, whisper_state* /*state*/, int n_new, void* udata) {
+        auto* state = static_cast<StreamCallbackState*>(udata);
+        int total_segs = whisper_full_n_segments(wctx);
+        int start_seg = total_segs - n_new;
+        if (start_seg < 0) start_seg = 0;
+
+        for (int s = start_seg; s < total_segs; ++s) {
+          Segment seg;
+          const char* seg_text = whisper_full_get_segment_text(wctx, s);
+          seg.text = seg_text != nullptr ? seg_text : "";
+          // Relative to this decode window + base_offset_ms -> chapter absolute
+          seg.t0_ms = state->base_offset_ms + cs_to_ms(whisper_full_get_segment_t0(wctx, s));
+          seg.t1_ms = state->base_offset_ms + cs_to_ms(whisper_full_get_segment_t1(wctx, s));
+
+          const int n_tokens = whisper_full_n_tokens(wctx, s);
+          Word current;
+          bool have_current = false;
+
+          auto flush = [&]() {
+            if (have_current && !current.text.empty()) {
+              seg.words.push_back(current);
+            }
+            have_current = false;
+            current = Word{};
+          };
+
+          for (int t = 0; t < n_tokens; ++t) {
+            const whisper_token id = whisper_full_get_token_id(wctx, s, t);
+            if (id >= whisper_token_eot(wctx)) continue;
+
+            const char* raw = whisper_full_get_token_text(wctx, s, t);
+            if (raw == nullptr) continue;
+            std::string piece = raw;
+            if (piece.empty()) continue;
+
+            const whisper_token_data data = whisper_full_get_token_data(wctx, s, t);
+            int64_t tok_t0 = state->base_offset_ms + cs_to_ms(data.t_dtw >= 0 ? data.t_dtw : data.t0);
+            int64_t tok_t1 = state->base_offset_ms + cs_to_ms(data.t1);
+
+            const bool starts_word = piece[0] == ' ';
+            if (starts_word) {
+              flush();
+              piece.erase(0, 1);
+              if (piece.empty()) continue;
+              current.text = piece;
+              current.t0_ms = tok_t0;
+              current.t1_ms = std::max(tok_t0, tok_t1);
+              have_current = true;
+            } else {
+              if (!have_current) {
+                current.t0_ms = tok_t0;
+                current.t1_ms = tok_t0;
+                have_current = true;
+              }
+              current.text += piece;
+              current.t1_ms = std::max({current.t0_ms, current.t1_ms, tok_t1});
+            }
+          }
+          flush();
+
+          state->ctx->segments.push_back(seg);
+
+          // Fire streaming callback
+          state->on_segment(seg.t0_ms, seg.t1_ms, seg.text.c_str(),
+                            static_cast<int32_t>(seg.words.size()), state->user_data);
+        }
+      };
+      params.new_segment_callback_user_data = &cb_state;
+    }
+
+    ctx->abort_requested.store(false, std::memory_order_relaxed);
+    params.abort_callback = [](void* udata) -> bool {
+      auto* state = static_cast<StreamCallbackState*>(udata);
+      if (state->ctx != nullptr && state->ctx->abort_requested.load(std::memory_order_relaxed)) {
+        return true;
+      }
+      if (state->should_abort != nullptr) {
+        return state->should_abort(state->user_data);
+      }
+      return false;
+    };
+    params.abort_callback_user_data = &cb_state;
+
+    rc = whisper_full(ctx->ctx, params, samples, n_samples);
+    free(samples);
+    if (rc != 0) {
+      ctx->last_error = "whisper_full streaming failed with code " + std::to_string(rc);
+      return rc;
+    }
+    return 0;
+  } catch (const std::exception& e) {
+    ctx->segments.clear();
+    ctx->last_error = std::string("native exception in streaming transcribe: ") + e.what();
+    return -2;
+  } catch (...) {
+    ctx->segments.clear();
+    ctx->last_error = "unknown native exception in streaming transcription";
     return -3;
   }
 }
@@ -562,6 +764,12 @@ const char* awe_last_error(awe_context* ctx) {
 uint32_t awe_get_backend_flags(awe_context* ctx) {
   if (ctx == nullptr) return 0;
   return ctx->backend_flags;
+}
+
+void awe_abort(awe_context* ctx) {
+  if (ctx != nullptr) {
+    ctx->abort_requested.store(true, std::memory_order_relaxed);
+  }
 }
 
 void awe_free(awe_context* ctx) {
