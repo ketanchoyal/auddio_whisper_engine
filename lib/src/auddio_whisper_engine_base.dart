@@ -38,16 +38,20 @@ void _nativeLogCapture(int level, Pointer<Char> text, Pointer<Void> userData) {
   }
 }
 
-class AuddioWhisperEngine {
+class AuddioWhisperEngine implements Finalizable {
   AuddioWhisperEngine._(
     this._bindings,
     this._ctx, {
     this.isCoreMlActive = false,
     this.isMetalActive = false,
     this.logsDelivered = false,
-  });
+  }) {
+    _finalizer = NativeFinalizer(_bindings.freePtr.cast());
+    _finalizer.attach(this, _ctx, detach: this);
+  }
 
   final WhisperBindings _bindings;
+  late final NativeFinalizer _finalizer;
   Pointer<Void> _ctx;
   final bool isCoreMlActive;
 
@@ -497,6 +501,7 @@ class AuddioWhisperEngine {
 
   void dispose() {
     if (_ctx == nullptr) return;
+    _finalizer.detach(this);
     _bindings.free(_ctx);
     _ctx = nullptr;
   }

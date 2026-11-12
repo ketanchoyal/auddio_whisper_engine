@@ -3,12 +3,12 @@ description: >-
   Custom whisper.cpp FFI engine for Auddio chapter transcription with
   per-word (DTW) timestamps. Loads a prebuilt libauddio_whisper native
   library (Metal + CoreML on Apple, CPU/NEON on Android) via dart:ffi.
-version: 0.0.19
+version: 0.0.20
 publish_to: none
 
 environment:
-  sdk: ">=3.13.0 <4.0.0"
-  flutter: ">=3.47.0"
+  sdk: ">=3.14.0 <4.0.0"
+  flutter: ">=3.50.0"
 
 dependencies:
   flutter:

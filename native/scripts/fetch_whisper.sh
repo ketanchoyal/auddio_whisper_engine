@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-WHISPER_COMMIT="371b5a7561823ab2bb32142d2751e35e7534727b"
+WHISPER_COMMIT="d1be6fde11ac6e0407606b4e42fe72d34add8037"
 WHISPER_REPO="https://github.com/ggml-org/whisper.cpp.git"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -169,8 +169,10 @@ class WhisperBindings {
         abort = lib.providesSymbol('awe_abort')
             ? lib.lookupFunction<AweAbortC, AweAbortDart>('awe_abort')
             : null,
+        freePtr = lib.lookup<NativeFunction<AweFreeC>>('awe_free'),
         free = lib.lookupFunction<AweFreeC, AweFreeDart>('awe_free');
 
+  final Pointer<NativeFunction<AweFreeC>> freePtr;
   final AweInitDart init;
   final AweTranscribeFileWindowDart transcribeFileWindow;
   final AweTranscribeStreamDart? transcribeStream;
